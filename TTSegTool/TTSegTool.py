@@ -1,6 +1,10 @@
 import os
+import qt
 import unittest
 import logging
+from csv import DictReader, DictWriter
+from pathlib import Path
+
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
@@ -18,7 +22,6 @@ class TTSegToolSliceletWidget:
       import traceback
       traceback.print_exc()
       logging.error("There is no parent to TTSegToolSliceletWidget!")
-
 
 class SliceletMainFrame(qt.QDialog):
   def setSlicelet(self, slicelet):
@@ -51,12 +54,16 @@ class TTSegToolSlicelet(VTKObservationMixin):
     self.sliceletPanelLayout = qt.QVBoxLayout(self.sliceletPanel)
     self.sliceletPanelLayout.setMargin(4)
     self.sliceletPanelLayout.setSpacing(0)
-    self.layout.addWidget(self.sliceletPanel,1)
+    self.layout.addWidget(self.sliceletPanel,0)
 
+    self.ui = None
+    self.setDefaultParamaters()
     if resourcePath is not None:
       logging.debug(resourcePath)
       uiWidget = slicer.util.loadUI(resourcePath)
       self.layout.addWidget(uiWidget)
+      self.ui = slicer.util.childWidgetVariables(uiWidget)
+      self.setupConnections()
 
     self.layoutWidget = slicer.qMRMLLayoutWidget() 
     self.layoutWidget.setMRMLScene(slicer.mrmlScene)
@@ -66,14 +73,63 @@ class TTSegToolSlicelet(VTKObservationMixin):
     self.parent.show()
 
   #------------------------------------------------------------------------------
-  def onLoadNonDicomData(self):
-    slicer.util.openAddDataDialog()
+  def disconnect(self):
+    pass
+
+  def setDefaultParamaters(self):
+    self.path_to_images = None
+    self.path_to_image_list = None
+    self.path_to_segmentations = None
+    self.image_list = []
+
+  #------------------------------------------------------------------------------
+  def setupConnections(self):
+    self.ui.imageDirButton.connect('directoryChanged(QString)', self.onInputDirChanged)
+    self.ui.imageFileButton.clicked.connect(self.openFileNamesDialog)
+    logging.info('Done setting up connections ')
 
   #
   # -----------------------
   # Event handler functions
   # -----------------------
-  #
+  #  
+  #------------------------------------------------------------------------------
+  def onInputDirChanged(self, dir_name):
+    self.path_to_images = Path(str(dir_name))
+    if not self.path_to_images.exists:
+      logging.error('The directory {} does not exist'.format(self.path_to_images))
+    else:  
+      logging.info('Selected: {}'.format(dir_name))
+      if len(self.image_list) > 0 and self.path_to_images:
+        self.startProcessingFiles()
+
+  #------------------------------------------------------------------------------
+  def onLoadNonDicomData(self):
+    slicer.util.openAddDataDialog()
+  
+  def openFileNamesDialog(self):
+        logging.info('In here!')
+        
+        file = qt.QFileDialog.getOpenFileName(None,"Choose the CSV Input", "","CSV files (*.csv)")
+        if file:
+            self.path_to_image_list = Path(file)
+            self.ui.imageFileButton.setText(str(self.path_to_image_list))
+
+            # read the excl sheet, and convert to dict
+            try:
+              with open(self.path_to_image_list, 'r') as f:
+                dr = DictReader(f)
+                if 'filename' not in dr.fieldnames:
+                  raise Exception("expecting the field-> filename")
+                self.initData()
+                self.image_list = [row['filename'] for row in dr]
+            except Exception as e:
+              slicer.util.errorDisplay("Error processing input csv\n ERROR:  {}".format(e))
+              self.ui.imageFileButton.setText("Not Selected")
+            slicer.util.infoDisplay( "Found a list of {} images".format(len(self.image_list)))
+            if len(self.image_list) > 0 and self.path_to_images:
+                self.startProcessingFiles()
+
   def onViewSelect(self, layoutIndex):
     if layoutIndex == 0:
        self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpView)
@@ -92,6 +148,25 @@ class TTSegToolSlicelet(VTKObservationMixin):
     elif layoutIndex == 7:
         self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutOneUpRedSliceView)
 
+  def initData(self):
+        self.image_list=[]
+        self.current_ind = -1
+
+  def startProcessingFiles(self):
+    if self.path_to_images and len(self.image_list) > 0:
+      found_at_least_one = False
+      for name in self.image_list:
+        imgpath = self.path_to_images/(name +".jpg")
+        logging.info('Looking for image: {}'.format(imgpath))
+        if imgpath.exists():
+          found_at_least_one = True
+          break
+      
+      if found_at_least_one:
+        self.current_ind = -1
+        logging.info("Will plot next here")
+      else:
+        slicer.util.errorDisplay("Couldn't find images from the list in directory: {}".format(self.path_to_image_list))
 #
 # TTSegTool
 #
