@@ -59,7 +59,6 @@ class TTSegToolSlicelet(VTKObservationMixin):
     self.ui = None
     self.setDefaultParamaters()
     if resourcePath is not None:
-      logging.debug(resourcePath)
       uiWidget = slicer.util.loadUI(resourcePath)
       self.layout.addWidget(uiWidget)
       self.ui = slicer.util.childWidgetVariables(uiWidget)
@@ -80,13 +79,38 @@ class TTSegToolSlicelet(VTKObservationMixin):
     self.path_to_images = None
     self.path_to_image_list = None
     self.path_to_segmentations = None
-    self.image_list = []
+    self.initData()
+    self.updateNavigationUI()
+  
+  def updateNavigationUI(self):
+    if self.ui == None:
+      return
+
+    if len(self.image_list) == 0:
+      min = 0
+      max = 0
+      ind = 0
+    else:
+      min = 1
+      ind - self.current_ind + 1
+      max = len(self.image_list)
+
+    if self.current_ind >= 0 and self.current_ind < max:
+      detailsText = "::: Image {}/{} ::: FILE NAME: {}".format(ind, max, self.image_list[self.current_ind])
+    else:
+      detailsText = "Image list empty"
+    
+    self.ui.imagePosLabel.setText("{}/{}".format(ind,max))
+    self.ui.imageNavigationScrollBar.setMinimum(min)
+    self.ui.imageNavigationScrollBar.setMaximum(max)
+    self.ui.imageDetailsLabel.setText(detailsText)  
 
   #------------------------------------------------------------------------------
   def setupConnections(self):
     self.ui.imageDirButton.connect('directoryChanged(QString)', self.onInputDirChanged)
     self.ui.imageFileButton.clicked.connect(self.openFileNamesDialog)
-    logging.info('Done setting up connections ')
+    self.ui.imageNavigationScrollBar.setTracking(False)
+    self.ui.imageNavigationScrollBar.valueChanged.connect(self.onImageIndexChanged)
 
   #
   # -----------------------
@@ -99,7 +123,6 @@ class TTSegToolSlicelet(VTKObservationMixin):
     if not self.path_to_images.exists:
       logging.error('The directory {} does not exist'.format(self.path_to_images))
     else:  
-      logging.info('Selected: {}'.format(dir_name))
       if len(self.image_list) > 0 and self.path_to_images:
         self.startProcessingFiles()
 
@@ -108,8 +131,6 @@ class TTSegToolSlicelet(VTKObservationMixin):
     slicer.util.openAddDataDialog()
   
   def openFileNamesDialog(self):
-        logging.info('In here!')
-        
         file = qt.QFileDialog.getOpenFileName(None,"Choose the CSV Input", "","CSV files (*.csv)")
         if file:
             self.path_to_image_list = Path(file)
@@ -129,6 +150,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
             slicer.util.infoDisplay( "Found a list of {} images".format(len(self.image_list)))
             if len(self.image_list) > 0 and self.path_to_images:
                 self.startProcessingFiles()
+      self.parent.show()
 
   def onViewSelect(self, layoutIndex):
     if layoutIndex == 0:
@@ -148,22 +170,28 @@ class TTSegToolSlicelet(VTKObservationMixin):
     elif layoutIndex == 7:
         self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutOneUpRedSliceView)
 
+  def onImageIndexChanged(self, scroll_pos):
+    self.current_ind = scroll_pos-1
+    self.updateNavigationUI()
+    #TODO: Code for plotting the image at this index comes here
+
   def initData(self):
         self.image_list=[]
         self.current_ind = -1
+        self.updateNavigationUI()
 
   def startProcessingFiles(self):
     if self.path_to_images and len(self.image_list) > 0:
       found_at_least_one = False
       for name in self.image_list:
         imgpath = self.path_to_images/(name +".jpg")
-        logging.info('Looking for image: {}'.format(imgpath))
         if imgpath.exists():
           found_at_least_one = True
           break
       
       if found_at_least_one:
-        self.current_ind = -1
+        self.current_ind = 0
+        self.updateNavigationUI()
         logging.info("Will plot next here")
       else:
         slicer.util.errorDisplay("Couldn't find images from the list in directory: {}".format(self.path_to_image_list))
@@ -260,66 +288,66 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
   #     traceback.print_exc()
 
 
-#
-# TTSegToolLogic
-#
+# #
+# # TTSegToolLogic
+# #
 
-class TTSegToolLogic(ScriptedLoadableModuleLogic):
-  """This class should implement all the actual
-  computation done by your module.  The interface
-  should be such that other python code can import
-  this class and make use of the functionality without
-  requiring an instance of the Widget.
-  Uses ScriptedLoadableModuleLogic base class, available at:
-  https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
-  """
+# class TTSegToolLogic(ScriptedLoadableModuleLogic):
+#   """This class should implement all the actual
+#   computation done by your module.  The interface
+#   should be such that other python code can import
+#   this class and make use of the functionality without
+#   requiring an instance of the Widget.
+#   Uses ScriptedLoadableModuleLogic base class, available at:
+#   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
+#   """
 
-  def __init__(self):
-    """
-    Called when the logic class is instantiated. Can be used for initializing member variables.
-    """
-    ScriptedLoadableModuleLogic.__init__(self)
+#   def __init__(self):
+#     """
+#     Called when the logic class is instantiated. Can be used for initializing member variables.
+#     """
+#     ScriptedLoadableModuleLogic.__init__(self)
 
-  def setDefaultParameters(self, parameterNode):
-    """
-    Initialize parameter node with default settings.
-    """
-    if not parameterNode.GetParameter("Threshold"):
-      parameterNode.SetParameter("Threshold", "100.0")
-    if not parameterNode.GetParameter("Invert"):
-      parameterNode.SetParameter("Invert", "false")
+#   def setDefaultParameters(self, parameterNode):
+#     """
+#     Initialize parameter node with default settings.
+#     """
+#     if not parameterNode.GetParameter("Threshold"):
+#       parameterNode.SetParameter("Threshold", "100.0")
+#     if not parameterNode.GetParameter("Invert"):
+#       parameterNode.SetParameter("Invert", "false")
 
-  def process(self, inputVolume, outputVolume, imageThreshold, invert=False, showResult=True):
-    """
-    Run the processing algorithm.
-    Can be used without GUI widget.
-    :param inputVolume: volume to be thresholded
-    :param outputVolume: thresholding result
-    :param imageThreshold: values above/below this threshold will be set to 0
-    :param invert: if True then values above the threshold will be set to 0, otherwise values below are set to 0
-    :param showResult: show output volume in slice viewers
-    """
+#   def process(self, inputVolume, outputVolume, imageThreshold, invert=False, showResult=True):
+#     """
+#     Run the processing algorithm.
+#     Can be used without GUI widget.
+#     :param inputVolume: volume to be thresholded
+#     :param outputVolume: thresholding result
+#     :param imageThreshold: values above/below this threshold will be set to 0
+#     :param invert: if True then values above the threshold will be set to 0, otherwise values below are set to 0
+#     :param showResult: show output volume in slice viewers
+#     """
 
-    if not inputVolume or not outputVolume:
-      raise ValueError("Input or output volume is invalid")
+#     if not inputVolume or not outputVolume:
+#       raise ValueError("Input or output volume is invalid")
 
-    import time
-    startTime = time.time()
-    logging.info('Processing started')
+#     import time
+#     startTime = time.time()
+#     logging.info('Processing started')
 
-    # Compute the thresholded output volume using the "Threshold Scalar Volume" CLI module
-    cliParams = {
-      'InputVolume': inputVolume.GetID(),
-      'OutputVolume': outputVolume.GetID(),
-      'ThresholdValue' : imageThreshold,
-      'ThresholdType' : 'Above' if invert else 'Below'
-      }
-    cliNode = slicer.cli.run(slicer.modules.thresholdscalarvolume, None, cliParams, wait_for_completion=True, update_display=showResult)
-    # We don't need the CLI module node anymore, remove it to not clutter the scene with it
-    slicer.mrmlScene.RemoveNode(cliNode)
+#     # Compute the thresholded output volume using the "Threshold Scalar Volume" CLI module
+#     cliParams = {
+#       'InputVolume': inputVolume.GetID(),
+#       'OutputVolume': outputVolume.GetID(),
+#       'ThresholdValue' : imageThreshold,
+#       'ThresholdType' : 'Above' if invert else 'Below'
+#       }
+#     cliNode = slicer.cli.run(slicer.modules.thresholdscalarvolume, None, cliParams, wait_for_completion=True, update_display=showResult)
+#     # We don't need the CLI module node anymore, remove it to not clutter the scene with it
+#     slicer.mrmlScene.RemoveNode(cliNode)
 
-    stopTime = time.time()
-    logging.info('Processing completed in {0:.2f} seconds'.format(stopTime-startTime))
+#     stopTime = time.time()
+#     logging.info('Processing completed in {0:.2f} seconds'.format(stopTime-startTime))
 
 #
 # TTSegToolTest
@@ -389,7 +417,8 @@ class TTSegToolTest(ScriptedLoadableModuleTest):
 
     self.delayDisplay('Test passed')
 
-
+def onSliceletClosed():
+  logging.info('Closing the slicelet')
 
 #
 # Main
@@ -406,6 +435,7 @@ if __name__ == "__main__":
   mainFrame.minimumHeight = 720
   mainFrame.windowTitle = "TT Segmentation tool"
   mainFrame.setWindowFlags(qt.Qt.WindowCloseButtonHint | qt.Qt.WindowMaximizeButtonHint | qt.Qt.WindowTitleHint)
+  mainFrame.connect('destroyed()', onSliceletClosed)
   iconPath = os.path.join(os.path.dirname(__file__), 'Resources/Icons/TTSegTool.png')
   mainFrame.windowIcon = qt.QIcon(iconPath)
   mainFrame = qt.QFrame()

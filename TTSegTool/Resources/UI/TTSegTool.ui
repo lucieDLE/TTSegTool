@@ -34,24 +34,37 @@
       <item row="1" column="1">
        <widget class="ctkDirectoryButton" name="imageDirButton">
         <property name="focusPolicy">
-         <enum>Qt::NoFocus</enum>
+         <enum>Qt::TabFocus</enum>
         </property>
        </widget>
       </item>
       <item row="3" column="1">
-       <widget class="ctkDirectoryButton" name="segmenationDirButton"/>
+       <widget class="ctkDirectoryButton" name="segmenationDirButton">
+        <property name="focusPolicy">
+         <enum>Qt::TabFocus</enum>
+        </property>
+       </widget>
       </item>
       <item row="0" column="0">
        <widget class="QLabel" name="label_6">
+        <property name="focusPolicy">
+         <enum>Qt::NoFocus</enum>
+        </property>
+        <property name="toolTip">
+         <string>Select CSV File, needs a column 'filename'</string>
+        </property>
+        <property name="toolTipDuration">
+         <number>5</number>
+        </property>
         <property name="text">
-         <string>Excel file with image names: </string>
+         <string>CSV file with image names: </string>
         </property>
        </widget>
       </item>
       <item row="0" column="1">
        <widget class="QPushButton" name="imageFileButton">
         <property name="focusPolicy">
-         <enum>Qt::NoFocus</enum>
+         <enum>Qt::TabFocus</enum>
         </property>
         <property name="text">
          <string>Not Selected</string>
@@ -79,11 +92,17 @@
       </item>
       <item row="0" column="1">
        <widget class="QScrollBar" name="imageNavigationScrollBar">
+        <property name="focusPolicy">
+         <enum>Qt::TabFocus</enum>
+        </property>
         <property name="toolTip">
          <string>Chose either left or right arrow to move between images</string>
         </property>
         <property name="maximum">
          <number>0</number>
+        </property>
+        <property name="pageStep">
+         <number>1</number>
         </property>
         <property name="orientation">
          <enum>Qt::Horizontal</enum>
@@ -180,7 +199,9 @@
   <tabstop>inputsCollapsibleButton</tabstop>
   <tabstop>imageFileButton</tabstop>
   <tabstop>imageDirButton</tabstop>
+  <tabstop>segmenationDirButton</tabstop>
   <tabstop>navigationCollapsibleButton</tabstop>
+  <tabstop>imageNavigationScrollBar</tabstop>
   <tabstop>imagePatchCollapsibleButton</tabstop>
   <tabstop>applyButton</tabstop>
  </tabstops>
