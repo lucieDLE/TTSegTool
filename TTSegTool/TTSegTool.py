@@ -89,7 +89,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
     self.initData()
     self.updateNavigationUI()
   
-  def updatePatchesTable(self, ijk, healthy_patch = False, clearTable = False):
+  def updatePatchesTable(self, ijk=None, healthy_patch = False, clearTable = False):
     logging.info("{} {} {}".format(len(self.image_list), self.current_ind, self.path_to_images))
     if len(self.image_list) == 0 or \
        self.path_to_images is None or \
@@ -102,14 +102,15 @@ class TTSegToolSlicelet(VTKObservationMixin):
       self.ui.imagePatchesTableWidget.clearContents()
       return
     
-    numrows = self.ui.imagePatchesTableWidget.rowCount
-    self.ui.imagePatchesTableWidget.insertRow(numrows)
-    item = qt.QTableWidgetItem("{}".format(numrows))
-    self.ui.imagePatchesTableWidget.setItem(numrows, 0, item)
-    item1 = qt.QTableWidgetItem("{},{}".format(ijk[0], ijk[1]))
-    self.ui.imagePatchesTableWidget.setItem(numrows, 1, item1)
-    item2 = qt.QTableWidgetItem("Healthy" if healthy_patch else "TT")
-    self.ui.imagePatchesTableWidget.setItem(numrows, 2, item1)
+    if ijk is not None:
+      numrows = self.ui.imagePatchesTableWidget.rowCount
+      self.ui.imagePatchesTableWidget.insertRow(numrows)
+      item = qt.QTableWidgetItem("{}".format(numrows))
+      self.ui.imagePatchesTableWidget.setItem(numrows, 0, item)
+      item1 = qt.QTableWidgetItem("{},{}".format(ijk[0], ijk[1]))
+      self.ui.imagePatchesTableWidget.setItem(numrows, 1, item1)
+      item2 = qt.QTableWidgetItem("Healthy" if healthy_patch else "TT")
+      self.ui.imagePatchesTableWidget.setItem(numrows, 2, item2)
 
   #------------------------------------------------------------------------------
   def updateNavigationUI(self):
@@ -141,6 +142,9 @@ class TTSegToolSlicelet(VTKObservationMixin):
     self.ui.imageFileButton.clicked.connect(self.openFileNamesDialog)
     self.ui.imageNavigationScrollBar.setTracking(False)
     self.ui.imageNavigationScrollBar.valueChanged.connect(self.onImageIndexChanged)
+    self.ui.keepPatchPushButton.clicked.connect(self.onKeepHealthyPatchClicked)
+    self.ui.keepPatchTTPushButton.clicked.connect(self.onKeepTTPatchClicked)
+    self.ui.delPatchPushButton.clicked.connect(self.onDelPatchClicked)
 
   #------------------------------------------------------------------------------
   def setupLayoutConnections(self):
@@ -152,6 +156,50 @@ class TTSegToolSlicelet(VTKObservationMixin):
     self.interactor = sw.interactorStyle().GetInteractor()
     self.interactor.AddObserver(vtk.vtkCommand.LeftButtonPressEvent, self.OnClick)
     self.crosshairNode=slicer.util.getNode('Crosshair')
+
+
+  #
+  # -----------------------
+  # Event handler functions
+  # -----------------------
+  #  
+  #------------------------------------------------------------------------------
+  def onKeepHealthyPatchClicked(self):
+    if len(self.image_list) == 0 or \
+       self.path_to_images is None or \
+        self.current_ind < 0 or self.current_ind >= len(self.image_list):
+      logging.warning('Cannot update patches table: Select a valid csv file and point to a correct folder with images')
+      return
+    
+    row = self.ui.imagePatchesTableWidget.currentRow()
+    item = self.ui.imagePatchesTableWidget.item(row, 2)
+    if item is not None:
+      item.setText("Healthy")
+      self.ui.imagePatchesTableWidget.item(row,2).setText("Healthy")
+
+  def onKeepTTPatchClicked(self):
+    if len(self.image_list) == 0 or \
+       self.path_to_images is None or \
+        self.current_ind < 0 or self.current_ind >= len(self.image_list):
+      logging.warning('Cannot update patches table: Select a valid csv file and point to a correct folder with images')
+      return
+    
+    row = self.ui.imagePatchesTableWidget.currentRow()
+    item = self.ui.imagePatchesTableWidget.item(row, 2)
+    if item is not None:
+      item.setText("Healthy")
+      self.ui.imagePatchesTableWidget.item(row,2).setText("TT")
+
+  def onDelPatchClicked(self):
+    if len(self.image_list) == 0 or \
+       self.path_to_images is None or \
+        self.current_ind < 0 or self.current_ind >= len(self.image_list):
+      logging.warning('Cannot update patches table: Select a valid csv file and point to a correct folder with images')
+      return
+    
+    row = self.ui.imagePatchesTableWidget.currentRow()
+    logging.info('Removing image patch at position: {}'.format(row))
+    self.ui.imagePatchesTableWidget.removeRow(row)
 
   #------------------------------------------------------------------------------
   def OnClick(self, caller, event):
@@ -178,11 +226,6 @@ class TTSegToolSlicelet(VTKObservationMixin):
         self.updatePatchesTable(ijk)
         slicer.util.infoDisplay("Position: {}".format(ijk))
 
-  #
-  # -----------------------
-  # Event handler functions
-  # -----------------------
-  #  
   #------------------------------------------------------------------------------
   def onInputDirChanged(self, dir_name):
     self.path_to_images = Path(str(dir_name))
@@ -240,6 +283,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
     self.current_ind = scroll_pos-1
     self.updateNavigationUI()
     self.showImageAtCurrentInd()
+    self.updatePatchesTable(clearTable=True)
     #TODO: Code for plotting the image at this index comes here
 
   def initData(self):
