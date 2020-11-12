@@ -89,12 +89,27 @@ class TTSegToolSlicelet(VTKObservationMixin):
     self.initData()
     self.updateNavigationUI()
   
-  def updatePatchesTable(self, ijk):
-    if len(self.image_list) == 0 or 
-        self.path_to_images is not None or
+  def updatePatchesTable(self, ijk, healthy_patch = False, clearTable = False):
+    logging.info("{} {} {}".format(len(self.image_list), self.current_ind, self.path_to_images))
+    if len(self.image_list) == 0 or \
+       self.path_to_images is None or \
         self.current_ind < 0 or self.current_ind >= len(self.image_list):
-      logging.warning('Cnnot update patches table: Select a valix excel file and point to a correct folder with images')
+      logging.warning('Cannot update patches table: Select a valid csv file and point to a correct folder with images')
       return
+    
+    if clearTable:
+      #TODO: Potentially can add a check if there's a file that already has the patches, and load it
+      self.ui.imagePatchesTableWidget.clearContents()
+      return
+    
+    numrows = self.ui.imagePatchesTableWidget.rowCount
+    self.ui.imagePatchesTableWidget.insertRow(numrows)
+    item = qt.QTableWidgetItem("{}".format(numrows))
+    self.ui.imagePatchesTableWidget.setItem(numrows, 0, item)
+    item1 = qt.QTableWidgetItem("{},{}".format(ijk[0], ijk[1]))
+    self.ui.imagePatchesTableWidget.setItem(numrows, 1, item1)
+    item2 = qt.QTableWidgetItem("Healthy" if healthy_patch else "TT")
+    self.ui.imagePatchesTableWidget.setItem(numrows, 2, item1)
 
   #------------------------------------------------------------------------------
   def updateNavigationUI(self):
@@ -161,7 +176,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
         ijkFloat = xyToIJK.TransformDoublePoint(xyz)
         ijk = [_roundInt(value) for value in ijkFloat]
         self.updatePatchesTable(ijk)
-        slicer.util.infoDisplay("Position for interactor: {}".format(ijk))
+        slicer.util.infoDisplay("Position: {}".format(ijk))
 
   #
   # -----------------------
