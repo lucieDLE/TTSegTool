@@ -5,6 +5,7 @@ import logging
 from csv import DictReader, DictWriter
 from pathlib import Path
 
+from CommonUtilities import utility
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
@@ -30,19 +31,20 @@ class SliceletMainFrame(qt.QDialog):
   def hideEvent(self, event):
     self.slicelet.disconnect()
 
-    import gc
-    refs = gc.get_referrers(self.slicelet)
-    if len(refs) > 1:
-      # logging.debug('Stuck slicelet references (' + repr(len(refs)) + '):\n' + repr(refs))
-      pass
+    # import gc
+    # refs = gc.get_referrers(self.slicelet)
+    # if len(refs) > 1:
+    #   # logging.debug('Stuck slicelet references (' + repr(len(refs)) + '):\n' + repr(refs))
+    #   pass
 
-    slicer.ttSegToolInstance = None
-    self.slicelet = None
-    self.deleteLater()
+    # slicer.ttSegToolInstance = None
+    # self.slicelet = None
+    # self.deleteLater()
 
 class TTSegToolSlicelet(VTKObservationMixin):
   def __init__(self, parent, developerMode=False, resourcePath=None):
     VTKObservationMixin.__init__(self)
+    slicer.mrmlScene.Clear()
     self.logic = None
     self.parent = parent
     self.parent.setLayout(qt.QHBoxLayout())
@@ -69,19 +71,32 @@ class TTSegToolSlicelet(VTKObservationMixin):
     self.parent.layout().addWidget(self.layoutWidget,2)
     self.onViewSelect(7)
     
+    # setup self connections
+    self.setupLayoutConnections()
+
     self.parent.show()
 
   #------------------------------------------------------------------------------
   def disconnect(self):
-    pass
+    logging.info('Disconnecting something')
 
+  #------------------------------------------------------------------------------
   def setDefaultParamaters(self):
     self.path_to_images = None
     self.path_to_image_list = None
     self.path_to_segmentations = None
+    self.image_node = None
     self.initData()
     self.updateNavigationUI()
   
+  def updatePatchesTable(self, ijk):
+    if len(self.image_list) == 0 or 
+        self.path_to_images is not None or
+        self.current_ind < 0 or self.current_ind >= len(self.image_list):
+      logging.warning('Cnnot update patches table: Select a valix excel file and point to a correct folder with images')
+      return
+
+  #------------------------------------------------------------------------------
   def updateNavigationUI(self):
     if self.ui == None:
       return
@@ -92,7 +107,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
       ind = 0
     else:
       min = 1
-      ind - self.current_ind + 1
+      ind = self.current_ind + 1
       max = len(self.image_list)
 
     if self.current_ind >= 0 and self.current_ind < max:
@@ -111,6 +126,42 @@ class TTSegToolSlicelet(VTKObservationMixin):
     self.ui.imageFileButton.clicked.connect(self.openFileNamesDialog)
     self.ui.imageNavigationScrollBar.setTracking(False)
     self.ui.imageNavigationScrollBar.valueChanged.connect(self.onImageIndexChanged)
+
+  #------------------------------------------------------------------------------
+  def setupLayoutConnections(self):
+    if self.layoutWidget is None:
+      logging.warning('Layout widget is not set')
+    
+    lm = self.layoutWidget.layoutManager()
+    sw = lm.sliceWidget('Red')
+    self.interactor = sw.interactorStyle().GetInteractor()
+    self.interactor.AddObserver(vtk.vtkCommand.LeftButtonPressEvent, self.OnClick)
+    self.crosshairNode=slicer.util.getNode('Crosshair')
+
+  #------------------------------------------------------------------------------
+  def OnClick(self, caller, event):
+    if self.interactor is not None and self.crosshairNode is not None:
+      def _roundInt(value):
+        try:
+          return int(round(value))
+        except ValueError:
+          logging.info('Getting a ValueError during roundupt')
+          return 0
+
+      xyz = [0,0,0]
+      sliceNode = self.crosshairNode.GetCursorPositionXYZ(xyz)
+      sliceLogic = None
+      if sliceNode:
+        appLogic = slicer.app.applicationLogic()
+        if appLogic:
+          sliceLogic = appLogic.GetSliceLogic(sliceNode)
+      if sliceLogic:
+        layerLogic =  sliceLogic.GetBackgroundLayer()
+        xyToIJK = layerLogic.GetXYToIJKTransform()
+        ijkFloat = xyToIJK.TransformDoublePoint(xyz)
+        ijk = [_roundInt(value) for value in ijkFloat]
+        self.updatePatchesTable(ijk)
+        slicer.util.infoDisplay("Position for interactor: {}".format(ijk))
 
   #
   # -----------------------
@@ -131,54 +182,55 @@ class TTSegToolSlicelet(VTKObservationMixin):
     slicer.util.openAddDataDialog()
   
   def openFileNamesDialog(self):
-        file = qt.QFileDialog.getOpenFileName(None,"Choose the CSV Input", "","CSV files (*.csv)")
-        if file:
-            self.path_to_image_list = Path(file)
-            self.ui.imageFileButton.setText(str(self.path_to_image_list))
+    file = qt.QFileDialog.getOpenFileName(None,"Choose the CSV Input", "","CSV files (*.csv)")
+    if file:
+      self.path_to_image_list = Path(file)
+      self.ui.imageFileButton.setText(str(self.path_to_image_list))
 
-            # read the excl sheet, and convert to dict
-            try:
-              with open(self.path_to_image_list, 'r') as f:
-                dr = DictReader(f)
-                if 'filename' not in dr.fieldnames:
-                  raise Exception("expecting the field-> filename")
-                self.initData()
-                self.image_list = [row['filename'] for row in dr]
-            except Exception as e:
-              slicer.util.errorDisplay("Error processing input csv\n ERROR:  {}".format(e))
-              self.ui.imageFileButton.setText("Not Selected")
-            slicer.util.infoDisplay( "Found a list of {} images".format(len(self.image_list)))
-            if len(self.image_list) > 0 and self.path_to_images:
-                self.startProcessingFiles()
-      self.parent.show()
+      # read the excl sheet, and convert to dict
+      try:
+        with open(self.path_to_image_list, 'r') as f:
+          dr = DictReader(f)
+          if 'filename' not in dr.fieldnames:
+            raise Exception("expecting the field-> filename")
+          self.initData()
+          self.image_list = [row['filename'] for row in dr]
+      except Exception as e:
+        slicer.util.errorDisplay("Error processing input csv\n ERROR:  {}".format(e))
+        self.ui.imageFileButton.setText("Not Selected")
+      slicer.util.infoDisplay( "Found a list of {} images".format(len(self.image_list)))
+      if len(self.image_list) > 0 and self.path_to_images:
+        self.startProcessingFiles()
+    self.parent.show()
 
   def onViewSelect(self, layoutIndex):
     if layoutIndex == 0:
-       self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpView)
+      self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpView)
     elif layoutIndex == 1:
-       self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutConventionalView)
+      self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutConventionalView)
     elif layoutIndex == 2:
-       self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutOneUp3DView)
+      self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutOneUp3DView)
     elif layoutIndex == 3:
-       self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutTabbedSliceView)
+      self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutTabbedSliceView)
     elif layoutIndex == 4:
-       self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutDual3DView)
+      self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutDual3DView)
     elif layoutIndex == 5:
-       self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpPlotView)
+      self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpPlotView)
     elif layoutIndex == 6:
-       self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutOneUpPlotView)
+      self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutOneUpPlotView)
     elif layoutIndex == 7:
-        self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutOneUpRedSliceView)
+      self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutOneUpRedSliceView)
 
   def onImageIndexChanged(self, scroll_pos):
     self.current_ind = scroll_pos-1
     self.updateNavigationUI()
+    self.showImageAtCurrentInd()
     #TODO: Code for plotting the image at this index comes here
 
   def initData(self):
-        self.image_list=[]
-        self.current_ind = -1
-        self.updateNavigationUI()
+    self.image_list=[]
+    self.current_ind = -1
+    self.updateNavigationUI()
 
   def startProcessingFiles(self):
     if self.path_to_images and len(self.image_list) > 0:
@@ -192,9 +244,26 @@ class TTSegToolSlicelet(VTKObservationMixin):
       if found_at_least_one:
         self.current_ind = 0
         self.updateNavigationUI()
-        logging.info("Will plot next here")
+        self.showImageAtCurrentInd()
       else:
         slicer.util.errorDisplay("Couldn't find images from the list in directory: {}".format(self.path_to_image_list))
+
+  def showImageAtCurrentInd(self):
+    if len(self.image_list) == 0 or self.path_to_image_list is None:
+      slicer.util.errorDisplay('Need to chose and image list and path to the images - make sure those are in')
+      return
+    if self.current_ind < 0 or self.current_ind >= len(self.image_list):
+      slicer.util.warningDisplay("Wrong image index: {}".format(self.current_ind))
+    
+    imgpath = self.path_to_images / (self.image_list[self.current_ind] + '.jpg')
+    try:
+      if self.image_node is not None:
+        utility.MRMLUtility.removeMRMLNode(self.image_node)
+      #utility.MRMLUtility.loadMRMLNode('image_node', self.path_to_images, self.image_list[self.current_ind] + '.jpg', 'VolumeFile') 
+      self.image_node = slicer.util.loadVolume(str(imgpath), {'singleFile':True})
+    except Exception as e:
+      slicer.util.errorDisplay("Couldn't load imagepath: {}\n ERROR: {}".format(imgpath, e))
+
 #
 # TTSegTool
 #
