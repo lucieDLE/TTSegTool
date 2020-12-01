@@ -148,15 +148,12 @@
         <item>
          <widget class="QPushButton" name="keepPatchPushButton">
           <property name="text">
-           <string>Keep Patch as Healthy</string>
+           <string>Save Patch Table</string>
           </property>
          </widget>
         </item>
         <item>
-         <widget class="QPushButton" name="pushButton">
-          <property name="text">
-           <string>Keep Patch as TT</string>
-          </property>
+         <widget class="QComboBox" name="patchLabelComboBox">
          </widget>
         </item>
         <item>
@@ -223,7 +220,7 @@
       <string>Segmentation Editor</string>
      </property>
      <property name="collapsed">
-      <bool>false</bool>
+      <bool>true</bool>
      </property>
      <widget class="qMRMLSegmentEditorWidget" name="SegmentEditorWidget">
       <property name="geometry">
