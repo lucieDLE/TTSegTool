@@ -74,7 +74,6 @@ class TTSegToolSlicelet(VTKObservationMixin):
     
     # setup self connections
     self.setupLayoutConnections()
-
     self.parent.show()
 
   #------------------------------------------------------------------------------
@@ -86,12 +85,14 @@ class TTSegToolSlicelet(VTKObservationMixin):
   #------------------------------------------------------------------------------
   def setDefaultParamaters(self):
     self.path_to_images = None
+    self.path_to_segmentations = None
     self.path_to_image_list = None
     self.path_to_segmentations = None
     self.image_node = None
+    self.segmentation_node = None
+    self.segmentation_editor_node = None
     self.initData()
-    self.updateNavigationUI()
-  
+    
   #------------------------------------------------------------------------------
   def updateFiducialLabel(self, index):
     if len(self.image_list) == 0 or \
@@ -225,6 +226,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
   #------------------------------------------------------------------------------
   def setupConnections(self):
     self.ui.imageDirButton.connect('directoryChanged(QString)', self.onInputDirChanged)
+    self.ui.segmenationDirButton.connect('directoryChanged(QString)', self.onSegmentationDirChanged)
     self.ui.imageFileButton.clicked.connect(self.openFileNamesDialog)
     self.ui.imageNavigationScrollBar.setTracking(False)
     self.ui.imageNavigationScrollBar.valueChanged.connect(self.onImageIndexChanged)
@@ -233,6 +235,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
     self.ui.patchLabelComboBox.addItems(["TT", "Healthy", "Epilation", "Unknown"])
     self.ui.patchLabelComboBox.currentIndexChanged.connect(self.updateFiducialLabel)
     self.ui.imagePatchesTableWidget.currentCellChanged.connect(self.updateFiducialSelection)
+    self.ui.showSegmentationCheckBox.stateChanged.connect(self.changeSegmentationVisibility)
 
   #------------------------------------------------------------------------------
   def setupLayoutConnections(self):
@@ -250,6 +253,15 @@ class TTSegToolSlicelet(VTKObservationMixin):
   # Event handler functions
   # -----------------------
   #  
+
+  def changeSegmentationVisibility(self, state):
+    if self.segmentation_node is None:
+      return
+    dn = self.segmentation_node.GetDisplayNode()
+    dn.SetVisibility(state)
+    if self.ui is not None:
+      self.ui.SegmentEditorWidget.setEnabled(state)
+
   #------------------------------------------------------------------------------
   def onSavePatchesButtonClicked(self):
     self.saveCurrentImagePatchInfo()
@@ -293,6 +305,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------
   def OnClick(self, caller, event):
+    print('Inside the onclick')
     if len(self.image_list) == 0 or \
        self.path_to_images is None or \
         self.current_ind not in range(len(self.image_list)):
@@ -310,19 +323,37 @@ class TTSegToolSlicelet(VTKObservationMixin):
       xyz = [0,0,0]
       ras = [0,0,0]
       sliceNode = self.crosshairNode.GetCursorPositionXYZ(xyz)
+      print('Got XYZ {}, slicenode: {}'.format(xyz, sliceNode))
       self.crosshairNode.GetCursorPositionRAS(ras)
-      sliceLogic = None
-      if sliceNode:
-        appLogic = slicer.app.applicationLogic()
-        if appLogic:
-          sliceLogic = appLogic.GetSliceLogic(sliceNode)
-      if sliceLogic:
-        layerLogic =  sliceLogic.GetBackgroundLayer()
-        xyToIJK = layerLogic.GetXYToIJKTransform()
-        ijkFloat = xyToIJK.TransformDoublePoint(xyz)
-        ijk = [_roundInt(value) for value in ijkFloat]
-        self.updatePatchesTable(ijk=ijk, ras=ras)
-        # slicer.util.infoDisplay("Position: {}".format(ijk))
+      if sliceNode is not None and sliceNode.GetName() == 'Red':
+        lm = self.layoutWidget.layoutManager()
+        sliceLogic = lm.sliceWidget('Red').sliceLogic()
+        if sliceLogic is None:
+          print('Empyt slice logic')
+        else:
+          layerLogic =  sliceLogic.GetBackgroundLayer()
+          xyToIJK = layerLogic.GetXYToIJKTransform()
+          ijkFloat = xyToIJK.TransformDoublePoint(xyz)
+          ijk = [_roundInt(value) for value in ijkFloat]
+          print('IJK: {}'.format(ijk))
+          self.updatePatchesTable(ijk=ijk, ras=ras)
+      else:
+        print('Something wrong with sliceNode: {}'.format(sliceNode))
+
+      # if sliceNode:
+      #   appLogic = slicer.app.applicationLogic()
+      #   print('Applogic: {}'.format(appLogic))
+      #   if appLogic:
+      #     sliceLogic = appLogic.GetSliceLogic(sliceNode)
+      #     print('Slicelogic: {}'.format(sliceLogic))
+      #     if sliceLogic:
+      #       layerLogic =  sliceLogic.GetBackgroundLayer()
+      #       xyToIJK = layerLogic.GetXYToIJKTransform()
+      #       ijkFloat = xyToIJK.TransformDoublePoint(xyz)
+      #       ijk = [_roundInt(value) for value in ijkFloat]
+      #       print('IJK: {}'.format(ijk))
+      #       self.updatePatchesTable(ijk=ijk, ras=ras)
+      #   # slicer.util.infoDisplay("Position: {}".format(ijk))
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------
@@ -333,7 +364,17 @@ class TTSegToolSlicelet(VTKObservationMixin):
     else:  
       if len(self.image_list) > 0 and self.path_to_images:
         self.startProcessingFiles()
-  
+
+  #------------------------------------------------------------------------------
+  #------------------------------------------------------------------------------
+  def onSegmentationDirChanged(self, dir_name):
+    self.path_to_segmentations = Path(str(dir_name))
+    if not self.path_to_segmentations:
+      logging.error('The directory {} does not exist'.format(self.path_to_images))
+    else:  
+      if len(self.image_list) > 0 and self.path_to_images:
+        self.startLoadingSegmentations()
+
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------
   def onLoadNonDicomData(self):
@@ -390,6 +431,8 @@ class TTSegToolSlicelet(VTKObservationMixin):
     self.updateNavigationUI()
     if self.current_ind >=0 and len(self.image_list) > 0:
       self.showImageAtCurrentInd()
+      if self.path_to_segmentations is not None:
+        self.loadCurrentSegmentation()
     self.updatePatchesTable(clearTable=True)
     self.loadExistingPatches()
 
@@ -406,10 +449,12 @@ class TTSegToolSlicelet(VTKObservationMixin):
     if len(fid) > 0:
       fidNode = slicer.util.getNode(fid)
       for row in range(fidNode.GetNumberOfFiducials()):
-        fidNode.RemoveNthControlPoint(row)
+        fidNode.RemoveNthControlPoint(0)
     if self.image_node is not None:
       utility.MRMLUtility.removeMRMLNode(self.image_node)
-    
+    if self.segmentation_node is not None:
+      utility.MRMLUtility.removeMRMLNode(self.segmentation_node)
+      utility.MRMLUtility.removeMRMLNode(self.segmentation_editor_node)
     self.updateNavigationUI()
 
 #------------------------------------------------------------------------------
@@ -424,11 +469,23 @@ class TTSegToolSlicelet(VTKObservationMixin):
 
 #------------------------------------------------------------------------------
 #------------------------------------------------------------------------------  
+  def getCurrentSegmentationFileName(self, ind=None):
+    if self.image_list is not None and len(self.image_list) > 0 and (self.current_ind in range( len(self.image_list)) or ind is not None):
+      if ind is None:
+        ind = self.current_ind
+      image_name = self.image_list[ind]
+      segmentation_file_name = image_name + '.nrrd'
+      return segmentation_file_name
+    else:
+      return None
+
+#------------------------------------------------------------------------------
+#------------------------------------------------------------------------------  
   def startProcessingFiles(self):
     if self.path_to_images and len(self.image_list) > 0:
       found_at_least_one = False
       for name in self.image_list:
-        imgpath = self.path_to_images/(name +".jpg")
+        imgpath = self.path_to_images/ (name+'.jpg')
         if imgpath.exists():
           found_at_least_one = True
           break
@@ -439,6 +496,61 @@ class TTSegToolSlicelet(VTKObservationMixin):
         self.showImageAtCurrentInd()
       else:
         slicer.util.errorDisplay("Couldn't find images from the list in directory: {}".format(self.path_to_image_list))
+
+  def startLoadingSegmentations(self):
+    if self.path_to_segmentations and len(self.image_list) > 0:
+      found_at_least_one = False
+      for ind in range(len(self.image_list)):
+        imgpath = self.path_to_segmentations / self.getCurrentSegmentationFileName(ind=ind)
+        if imgpath.exists():
+          found_at_least_one = True
+          break
+      
+      if found_at_least_one:
+        if self.ui is not None:
+          self.changeSegmentationVisibility(self.ui.showSegmentationCheckBox.isChecked())
+
+        if self.current_ind >= 0:
+          self.loadCurrentSegmentation()
+        else:
+          if self.path_to_images and len(self.image_list) > 0:
+            self.current_ind = 0
+            self.updateNavigationUI()
+            self.showImageAtCurrentInd()
+            self.loadCurrentSegmentation()
+      else:
+        slicer.util.errorDisplay("Couldn't find images from the list in directory: {}".format(self.path_to_image_list))
+
+  def loadCurrentSegmentation(self):
+    if len(self.image_list) == 0 or self.path_to_image_list is None: 
+      slicer.util.errorDisplay('Show image at current IND: Need to chose an image list and path to the images - make sure those are in')
+      return
+    if self.current_ind < 0 or self.current_ind >= len(self.image_list):
+      slicer.util.warningDisplay("Wrong image index: {}".format(self.current_ind))
+    
+    imgpath = self.path_to_segmentations /  self.getCurrentSegmentationFileName()
+    try:
+      if self.segmentation_node is not None:
+        utility.MRMLUtility.removeMRMLNode(self.segmentation_node)
+        utility.MRMLUtility.removeMRMLNode(self.segmentation_editor_node)
+      #utility.MRMLUtility.loadMRMLNode('image_node', self.path_to_images, self.image_list[self.current_ind] + '.jpg', 'VolumeFile') 
+      self.segmentation_node = slicer.util.loadSegmentation(str(imgpath))
+      dn = self.segmentation_node.GetDisplayNode()
+      dn.SetVisibility2DOutline(0)
+      dn.SetVisibility2DFill(1)
+      if self.ui is not None:
+        self.ui.SegmentEditorWidget.setMRMLScene(slicer.mrmlScene)
+        self.segmentation_editor_node = slicer.vtkMRMLSegmentEditorNode()
+        slicer.mrmlScene.AddNode(self.segmentation_editor_node)
+        self.ui.SegmentEditorWidget.setMRMLSegmentEditorNode(self.segmentation_editor_node)
+        self.ui.SegmentEditorWidget.setSegmentationNode(self.segmentation_node)
+        if self.image_node is not None:
+          self.ui.SegmentEditorWidget.setMasterVolumeNode(self.image_node)
+        visibility = self.ui.showSegmentationCheckBox.isChecked()
+        dn.SetVisibility(visibility)
+
+    except Exception as e:
+      slicer.util.errorDisplay("Couldn't load imagepath: {}\n ERROR: {}".format(imgpath, e))
 
 #------------------------------------------------------------------------------
 #------------------------------------------------------------------------------  
@@ -558,13 +670,13 @@ class TTSegToolSlicelet(VTKObservationMixin):
       logging.error('Error writing the csv file: {} \n  {}'.format(csv_file_path, e))
 
   def updateFiducialSelection(self, row, col, prevrow, prevcol):
-    print('In updatefiducial selection')
+    logging.debug('In updatefiducial selection')
     if row not in range(self.ui.imagePatchesTableWidget.rowCount):
       return
 
     comboBoxLabel = self.ui.patchLabelComboBox.currentText
     tableLabel = self.ui.imagePatchesTableWidget.item(row, 2).text()
-    print('Combobox label: {}, tablelabel: {}'.format(comboBoxLabel, tableLabel))
+    logging.debug('Combobox label: {}, tablelabel: {}'.format(comboBoxLabel, tableLabel))
     if tableLabel != comboBoxLabel:
       all_labels = [self.ui.patchLabelComboBox.itemText(i) for i in range(self.ui.patchLabelComboBox.count)]
       if tableLabel not in all_labels:
@@ -577,7 +689,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
     if len(fid) > 0:
       fidNode = slicer.util.getNode(fid)
       fiducialCount = fidNode.GetNumberOfFiducials()
-      print('Fiducial count is: {}'.format(fiducialCount))
+      logging.debug('Fiducial count is: {}'.format(fiducialCount))
       if row in range(fiducialCount):
         for r in range(fiducialCount):
           if r == row:
@@ -670,12 +782,6 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
   def onSliceletClosed(self):
     logging.debug('Slicelet closed')
-
-  #   except Exception as e:
-  #     slicer.util.errorDisplay("Failed to compute results: "+str(e))
-  #     import traceback
-  #     traceback.print_exc()
-
 
 # #
 # # TTSegToolLogic
@@ -821,11 +927,11 @@ if __name__ == "__main__":
   logging.debug( sys.argv )
   mainFrame = SliceletMainFrame()
   mainFrame.minimumWidth = 1200
-  mainFrame.minimumHeight = 720
+  mainFrame.minimumHeight = 1080
   mainFrame.windowTitle = "TT Segmentation tool"
   mainFrame.setWindowFlags(qt.Qt.WindowCloseButtonHint | qt.Qt.WindowMaximizeButtonHint | qt.Qt.WindowTitleHint)
   mainFrame.connect('destroyed()', onSliceletClosed)
   iconPath = os.path.join(os.path.dirname(__file__), 'Resources/Icons/TTSegTool.png')
   mainFrame.windowIcon = qt.QIcon(iconPath)
-  mainFrame = qt.QFrame()
+  # mainFrame = qt.QFrame()
   slicelet = TTSegToolSlicelet(mainFrame, resourcePath=os.path.join(os.path.dirname(__file__), 'Resources/UI/TTSegTool.ui'))
