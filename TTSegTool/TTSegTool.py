@@ -1,4 +1,6 @@
 import os
+from typing import Dict
+from numpy.core.shape_base import _arrays_for_stack_dispatcher
 import qt
 import unittest
 import logging
@@ -31,6 +33,7 @@ class SliceletMainFrame(qt.QDialog):
 
   def hideEvent(self, event):
     self.slicelet.disconnect()
+    self.slicelet = None
 
     # import gc
     # refs = gc.get_referrers(self.slicelet)
@@ -48,6 +51,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
     slicer.mrmlScene.Clear()
     self.logic = None
     self.parent = parent
+    self.parent.showMaximized()
     self.parent.setLayout(qt.QHBoxLayout())
     self.layout = self.parent.layout()
     self.layout.setMargin(0)
@@ -79,28 +83,121 @@ class TTSegToolSlicelet(VTKObservationMixin):
   #------------------------------------------------------------------------------
   def disconnect(self):
     self.saveCurrentImagePatchInfo()
-    self.initData(clearScene=True)
+    self.saveCurrentRowToMaster()
+    self.writeFinalMasterCSV()
+    self.initData()
+    self.updateUI()
     logging.info('Disconnecting something')
 
+#### CONNECTIONS #####
+  #------------------------------------------------------------------------------
+  def setupConnections(self):
+    self.ui.imageDirButton.connect('directoryChanged(QString)', self.onInputDirChanged)
+    self.ui.imageFileButton.clicked.connect(self.openFileNamesDialog)
+    self.ui.loadCSVPushButton.clicked.connect(self.loadData)
+    # Image navigation and master csv updates
+    self.ui.imageNavigationScrollBar.setTracking(False)
+    self.ui.imageNavigationScrollBar.valueChanged.connect(self.onImageIndexChanged)
+    # Patch management
+    self.ui.keepPatchPushButton.clicked.connect(self.onSavePatchesButtonClicked)
+    self.ui.delPatchPushButton.clicked.connect(self.onDelPatchClicked)
+    self.ui.patchLabelComboBox.addItems(["TT", "Healthy", "Epilation", "Unknown"])
+    self.ui.patchLabelComboBox.currentIndexChanged.connect(self.updateFiducialLabel)
+    self.ui.imagePatchesTableWidget.currentCellChanged.connect(self.updateFiducialSelection)
+    # segmentation management
+    self.ui.showSegmentationCheckBox.stateChanged.connect(self.changeSegmentationVisibility)
+
+  #------------------------------------------------------------------------------
+  def setupLayoutConnections(self):
+    if self.layoutWidget is None:
+      logging.warning('Layout widget is not set')
+    
+    lm = self.layoutWidget.layoutManager()
+    sw = lm.sliceWidget('Red')
+    self.interactor = sw.interactorStyle().GetInteractor()
+    self.interactor.AddObserver(vtk.vtkCommand.LeftButtonPressEvent, self.OnClick)
+    self.crosshairNode=slicer.util.getNode('Crosshair')
+
+##### Data cleanup/initialization ############
   #------------------------------------------------------------------------------
   def setDefaultParamaters(self):
-    self.path_to_images = None
-    self.path_to_segmentations = None
-    self.path_to_image_list = None
-    self.path_to_segmentations = None
-    self.image_node = None
-    self.segmentation_node = None
-    self.segmentation_editor_node = None
+    self.path_to_server = None
+    self.path_to_image_details = None
+    self.image_node = None # holds the current image
+    self.segmentation_node = None # holds the current segmentation
+    self.segmentation_editor_node = None # holds the current segment editor node
+    self.interactor = None
+    self.crosshairNode = None
+    self.user_name = None
+    self.tmp_csv_file_name = None
     self.initData()
+    self.updateUI()
+
+#------------------------------------------------------------------------------  
+  def initData(self):
+    self.image_list=[]
+    self.current_ind = -1
+
+    fid = slicer.modules.markups.logic().GetActiveListID()
+    if len(fid) > 0:
+      fidNode = slicer.util.getNode(fid)
+      for row in range(fidNode.GetNumberOfFiducials()):
+        fidNode.RemoveNthControlPoint(0)
+    if self.image_node is not None:
+      utility.MRMLUtility.removeMRMLNode(self.image_node)
+    if self.segmentation_node is not None:
+      utility.MRMLUtility.removeMRMLNode(self.segmentation_node)
+      utility.MRMLUtility.removeMRMLNode(self.segmentation_editor_node)
+    # self.updateNavigationUI()
+
+##### UI Updates ###########
+#------------------------------------------------------------------------------
+  def updateUI(self):
+    self.current_ind = -1
+    if self.current_ind < 0:
+      if self.ui is not None and self.ui.imagePatchesTableWidget is not None:
+          for row in range(self.ui.imagePatchesTableWidget.rowCount):
+              self.ui.imagePatchesTableWidget.removeRow(row)
+    self.updateNavigationUI()
+
+#------------------------------------------------------------------------------
+  def updateNavigationUI(self):
+    if self.ui == None:
+      return
+    ind = None
+    detailsText=None
+    if len(self.image_list) == 0:
+      min = 0
+      max = 0
+      ind = 0
+    else:
+      min = 1
+      ind = self.current_ind + 1
+      max = len(self.image_list)
+
+    if self.current_ind >= 0 and self.current_ind < max:
+      detailsText = "::: Image {}/{} ::: ID ::: {} ::: Eye ::: {}".format(ind, max, self.image_list[self.current_ind]['cid'], self.image_list[self.current_ind]['eye'])
+    else:
+      detailsText = "Image list empty"
     
+    self.ui.imagePosLabel.setText("{}/{}".format(ind,max))
+    self.ui.imageNavigationScrollBar.setMinimum(min)
+    self.ui.imageNavigationScrollBar.setMaximum(max)
+    self.ui.imageDetailsLabel.setText(detailsText)
+    self.ui.imageDetailsTable.setEnabled(self.current_ind >= 0)
+    if self.current_ind >= 0:
+      self.ui.imageDetailsTable.selectRow(self.current_ind)
+
+
+############ Fiducial hanling ###############
   #------------------------------------------------------------------------------
   def updateFiducialLabel(self, index):
     if len(self.image_list) == 0 or \
-       self.path_to_images is None or \
+       self.path_to_server is None or \
         self.current_ind  not in range(len(self.image_list)):
-      logging.warning('Cannot update patches table: Select a valid csv file and point to a correct folder with images')
+      logging.info('Cannot update Fiducial label: Select a valid image info file.')
       return
-    
+
     row = self.ui.imagePatchesTableWidget.currentRow()
     new_label = self.ui.patchLabelComboBox.itemText(index)
     fid = slicer.modules.markups.logic().GetActiveListID()
@@ -108,10 +205,16 @@ class TTSegToolSlicelet(VTKObservationMixin):
       fidNode = slicer.util.getNode(fid)
       if row in range(fidNode.GetNumberOfFiducials()):
         fidNode.SetNthFiducialLabel(row, new_label)
-        self.ui.imagePatchesTableWidget.item(row, 2).setText(new_label)
+        self.ui.imagePatchesTableWidget.item(row, 1).setText(new_label)
 
 #------------------------------------------------------------------------------
   def addFiducial(self, row_id, ras, label=None):
+    if len(self.image_list) == 0 or \
+       self.path_to_server is None or \
+        self.current_ind  not in range(len(self.image_list)):
+      logging.info('Cannot add Fiducial label:  No images or select a valid image info file.')
+      return
+
     # This assumes that the row_id is already present in the patches table, 
     # Labels are taken from there when necessary
     if row_id is None or ras is None or row_id not in range(self.ui.imagePatchesTableWidget.rowCount):
@@ -130,11 +233,12 @@ class TTSegToolSlicelet(VTKObservationMixin):
     fid_n = row_id
     if fid_n in range(fidNode.GetNumberOfFiducials()):
       if label is None:        
-        label = self.ui.imagePatchesTableWidget.item(row_id, 2).text()
+        label = self.ui.imagePatchesTableWidget.item(row_id, 1).text()
       fidNode.SetNthFiducialLabel(fid_n, label)
       fidNode.SetNthFiducialPosition(fid_n, ras[0], ras[1], ras[2])
       fidNode.SetNthFiducialSelected(fid_n, 0)
 
+##### Patch table management #####
 #------------------------------------------------------------------------------
   def addPatchRow(self, ijk, label=None):
     # Check the IJK and RAS is non-empty
@@ -143,23 +247,21 @@ class TTSegToolSlicelet(VTKObservationMixin):
     
     row_id = self.ui.imagePatchesTableWidget.rowCount
     self.ui.imagePatchesTableWidget.insertRow(row_id)
-    item = qt.QTableWidgetItem("{}".format(row_id+1))
-    self.ui.imagePatchesTableWidget.setItem(row_id, 0, item)
     item1 = qt.QTableWidgetItem("{},{}".format(ijk[0], ijk[1]))
-    self.ui.imagePatchesTableWidget.setItem(row_id, 1, item1)
+    self.ui.imagePatchesTableWidget.setItem(row_id, 0, item1)
 
     label_id = None
-    if label is None:        
+    if label is None:
       label = self.ui.patchLabelComboBox.currentText
     else:
       all_labels = [self.ui.patchLabelComboBox.itemText(i) for i in range(self.ui.patchLabelComboBox.count)]
       if label not in all_labels:
-        logging.warning('During adding row to patch table at row: {}, label: {} is marked unknown'.format(row_id, label))
+        logging.info('During adding row to patch table at row: {}, label: {} is marked unknown'.format(row_id, label))
         label = "Unknown"
       label_id = all_labels.index(label)
-    
+
     item2 = qt.QTableWidgetItem("{}".format(label))
-    self.ui.imagePatchesTableWidget.setItem(row_id, 2, item2)
+    self.ui.imagePatchesTableWidget.setItem(row_id, 1, item2)
     self.ui.imagePatchesTableWidget.selectRow(row_id)
 
     # Combo box is set after the row selection is done to get the correct 
@@ -172,9 +274,9 @@ class TTSegToolSlicelet(VTKObservationMixin):
 #------------------------------------------------------------------------------
   def updatePatchesTable(self, ijk=None, ras=None, clearTable = False):
     if len(self.image_list) == 0 or \
-       self.path_to_images is None or \
+       self.path_to_server is None or \
         self.current_ind < 0 or self.current_ind >= len(self.image_list):
-      logging.warning('Cannot update patches table: Select a valid csv file and point to a correct folder with images')
+      logging.info('Cannot update patches table: No images or select a valid image info file.')
       return
     
     if clearTable:  
@@ -189,71 +291,16 @@ class TTSegToolSlicelet(VTKObservationMixin):
     row_id = None
     if ijk is not None:
       row_id = self.addPatchRow(ijk)
-      # item3 = qt.QComboBox(self.ui.imagePatchesTableWidget)
-      # item3.addItems(["TT", "Healthy", "Epilation", "Unknown"])
-      # self.ui.imagePatchesTableWidget.setCellWidget(row_id, 2, item3)
-    
     # Create the fiducial
     if ras is not None and row_id is not None :
       self.addFiducial(row_id, ras)
-      self.updateFiducialSelection(row_id, 2, row_id, 2)
+      self.updateFiducialSelection(row_id)
 
-  #------------------------------------------------------------------------------
-  def updateNavigationUI(self):
-    if self.ui == None:
-      return
-    ind = None
-    detailsText=None
-    if len(self.image_list) == 0:
-      min = 0
-      max = 0
-      ind = 0
-    else:
-      min = 1
-      ind = self.current_ind + 1
-      max = len(self.image_list)
-
-    if self.current_ind >= 0 and self.current_ind < max:
-      detailsText = "::: Image {}/{} ::: FILE NAME: {}".format(ind, max, self.image_list[self.current_ind])
-    else:
-      detailsText = "Image list empty"
-    
-    self.ui.imagePosLabel.setText("{}/{}".format(ind,max))
-    self.ui.imageNavigationScrollBar.setMinimum(min)
-    self.ui.imageNavigationScrollBar.setMaximum(max)
-    self.ui.imageDetailsLabel.setText(detailsText)  
-
-  #------------------------------------------------------------------------------
-  def setupConnections(self):
-    self.ui.imageDirButton.connect('directoryChanged(QString)', self.onInputDirChanged)
-    self.ui.segmenationDirButton.connect('directoryChanged(QString)', self.onSegmentationDirChanged)
-    self.ui.imageFileButton.clicked.connect(self.openFileNamesDialog)
-    self.ui.imageNavigationScrollBar.setTracking(False)
-    self.ui.imageNavigationScrollBar.valueChanged.connect(self.onImageIndexChanged)
-    self.ui.keepPatchPushButton.clicked.connect(self.onSavePatchesButtonClicked)
-    self.ui.delPatchPushButton.clicked.connect(self.onDelPatchClicked)
-    self.ui.patchLabelComboBox.addItems(["TT", "Healthy", "Epilation", "Unknown"])
-    self.ui.patchLabelComboBox.currentIndexChanged.connect(self.updateFiducialLabel)
-    self.ui.imagePatchesTableWidget.currentCellChanged.connect(self.updateFiducialSelection)
-    self.ui.showSegmentationCheckBox.stateChanged.connect(self.changeSegmentationVisibility)
-
-  #------------------------------------------------------------------------------
-  def setupLayoutConnections(self):
-    if self.layoutWidget is None:
-      logging.warning('Layout widget is not set')
-    
-    lm = self.layoutWidget.layoutManager()
-    sw = lm.sliceWidget('Red')
-    self.interactor = sw.interactorStyle().GetInteractor()
-    self.interactor.AddObserver(vtk.vtkCommand.LeftButtonPressEvent, self.OnClick)
-    self.crosshairNode=slicer.util.getNode('Crosshair')
-
-  #
-  # -----------------------
-  # Event handler functions
-  # -----------------------
-  #  
-
+#
+# -----------------------
+# Event handler functions
+# -----------------------
+#
   def changeSegmentationVisibility(self, state):
     if self.segmentation_node is None:
       return
@@ -268,24 +315,9 @@ class TTSegToolSlicelet(VTKObservationMixin):
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------
-  def onKeepTTPatchClicked(self):
-    if len(self.image_list) == 0 or \
-       self.path_to_images is None or \
-        self.current_ind < 0 or self.current_ind >= len(self.image_list):
-      logging.warning('Cannot update patches table: Select a valid csv file and point to a correct folder with images')
-      return
-    
-    row = self.ui.imagePatchesTableWidget.currentRow()
-    item = self.ui.imagePatchesTableWidget.item(row, 2)
-    if item is not None:
-      item.setText("Healthy")
-      self.ui.imagePatchesTableWidget.item(row,2).setText("TT")
-
-  #------------------------------------------------------------------------------
-  #------------------------------------------------------------------------------
   def onDelPatchClicked(self):
     if len(self.image_list) == 0 or \
-       self.path_to_images is None or \
+       self.path_to_server is None or \
         self.current_ind < 0 or self.current_ind >= len(self.image_list):
       logging.warning('Cannot update patches table: Select a valid csv file and point to a correct folder with images')
       return
@@ -307,9 +339,9 @@ class TTSegToolSlicelet(VTKObservationMixin):
   def OnClick(self, caller, event):
     print('Inside the onclick')
     if len(self.image_list) == 0 or \
-       self.path_to_images is None or \
+       self.path_to_server is None or \
         self.current_ind not in range(len(self.image_list)):
-      logging.warning('Nothing to do OnClick: Select a valid csv file and point to a correct folder with images')
+      logging.info('Nothing to do OnClick: Load the data first')
       return
 
     if self.interactor is not None and self.crosshairNode is not None:
@@ -323,86 +355,186 @@ class TTSegToolSlicelet(VTKObservationMixin):
       xyz = [0,0,0]
       ras = [0,0,0]
       sliceNode = self.crosshairNode.GetCursorPositionXYZ(xyz)
-      print('Got XYZ {}, slicenode: {}'.format(xyz, sliceNode))
       self.crosshairNode.GetCursorPositionRAS(ras)
       if sliceNode is not None and sliceNode.GetName() == 'Red':
         lm = self.layoutWidget.layoutManager()
         sliceLogic = lm.sliceWidget('Red').sliceLogic()
         if sliceLogic is None:
-          print('Empyt slice logic')
+          logging.debug('Empyt slice logic')
         else:
           layerLogic =  sliceLogic.GetBackgroundLayer()
           xyToIJK = layerLogic.GetXYToIJKTransform()
           ijkFloat = xyToIJK.TransformDoublePoint(xyz)
           ijk = [_roundInt(value) for value in ijkFloat]
-          print('IJK: {}'.format(ijk))
           self.updatePatchesTable(ijk=ijk, ras=ras)
       else:
-        print('Something wrong with sliceNode: {}'.format(sliceNode))
-
-      # if sliceNode:
-      #   appLogic = slicer.app.applicationLogic()
-      #   print('Applogic: {}'.format(appLogic))
-      #   if appLogic:
-      #     sliceLogic = appLogic.GetSliceLogic(sliceNode)
-      #     print('Slicelogic: {}'.format(sliceLogic))
-      #     if sliceLogic:
-      #       layerLogic =  sliceLogic.GetBackgroundLayer()
-      #       xyToIJK = layerLogic.GetXYToIJKTransform()
-      #       ijkFloat = xyToIJK.TransformDoublePoint(xyz)
-      #       ijk = [_roundInt(value) for value in ijkFloat]
-      #       print('IJK: {}'.format(ijk))
-      #       self.updatePatchesTable(ijk=ijk, ras=ras)
-      #   # slicer.util.infoDisplay("Position: {}".format(ijk))
+        logging.debug('Something wrong with sliceNode: {}'.format(sliceNode))
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------
   def onInputDirChanged(self, dir_name):
-    self.path_to_images = Path(str(dir_name))
-    if not self.path_to_images.exists:
-      logging.error('The directory {} does not exist'.format(self.path_to_images))
-    else:  
-      if len(self.image_list) > 0 and self.path_to_images:
-        self.startProcessingFiles()
+    self.path_to_server = Path(str(dir_name))
+    if not self.path_to_server.exists():
+      logging.error('The directory {} does not exist'.format(self.path_to_server))
 
-  #------------------------------------------------------------------------------
-  #------------------------------------------------------------------------------
-  def onSegmentationDirChanged(self, dir_name):
-    self.path_to_segmentations = Path(str(dir_name))
-    if not self.path_to_segmentations:
-      logging.error('The directory {} does not exist'.format(self.path_to_images))
-    else:  
-      if len(self.image_list) > 0 and self.path_to_images:
-        self.startLoadingSegmentations()
-
-  #------------------------------------------------------------------------------
-  #------------------------------------------------------------------------------
-  def onLoadNonDicomData(self):
-    slicer.util.openAddDataDialog()
-  
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------
   def openFileNamesDialog(self):
     file = qt.QFileDialog.getOpenFileName(None,"Choose the CSV Input", "","CSV files (*.csv)")
     if file:
-      self.path_to_image_list = Path(file)
-      self.ui.imageFileButton.setText(str(self.path_to_image_list))
+      self.path_to_image_details = Path(file)
+      self.ui.imageFileButton.setText(str(self.path_to_image_details))
+      if self.path_to_server is not None:
+        return
 
-      # read the excl sheet, and convert to dict
-      try:
-        with open(self.path_to_image_list, 'r') as f:
-          dr = DictReader(f)
-          if 'filename' not in dr.fieldnames:
-            raise Exception("expecting the field-> filename")
-          self.initData()
-          self.image_list = [row['filename'] for row in dr]
-      except Exception as e:
-        slicer.util.errorDisplay("Error processing input csv \n ERROR:  {}".format(e))
-        self.ui.imageFileButton.setText("Not Selected")
-      slicer.util.infoDisplay( "Found a list of {} images".format(len(self.image_list)))
-      if len(self.image_list) > 0 and self.path_to_images:
-        self.startProcessingFiles()
+      # Try to estimate the server path:
+      if 'EGower' in self.path_to_image_details.parts:
+        ind = self.path_to_image_details.parts.index('EGower')
+        ancestor = Path()
+        for i in range(ind+1):
+          ancestor = ancestor/ self.path_to_image_details.parts[i]
+      else:
+        ancestor = self.path_to_image_details.parts[0]
+      self.ui.imageDirButton.directory = str(ancestor)
+
+######## MASTER DATA FILE Manipulation ####################
+#---------------------------------------------------------
+  def loadData(self):
+    # read the excl sheet, and convert to dict
+    if len(self.ui.usernameLineEdit.text) == 0:
+      slicer.utils.errorDisplay("Pleae provide a username")
+      return
+    if self.path_to_image_details is None:
+      slicer.utils.errorDisplay('Please provide a valid Master CSV File')
+      return
+    if self.path_to_server is None:
+      slicer.utils.errorDisplay('Please provide a valid server path ')
+      return
+    if not self.checkMasterFileForRequiredFields():
+      slicer.utils.errorDisplay('Did not find the fields that are at least required')
+
+    logging.info('Found the required fields in the master file! Loading')
+    try:
+      self.user_name = self.ui.usernameLineEdit.text
+      self.initData()
+      self.updateUI()
+      image_list = None
+      with open(self.path_to_image_details, 'r') as f:
+        dr = DictReader(f)
+        image_list = [row for row in dr]
+      self.createMasterDict(image_list)
+    except Exception as e:
+      slicer.util.errorDisplay("Error processing input csv \n ERROR:  {}".format(e))
+      self.ui.imageFileButton.setText("Not Selected")
+    slicer.util.infoDisplay( "Found a list of {} images".format(len(self.image_list)))
+    if len(self.image_list) > 0:
+      self.startProcessingFiles()
+      self.ui.inputsCollapsibleButton.collapsed = True
+      self.fillMasterTable()
     self.parent.show()
+
+#---------------------------------------------------------
+  def checkMasterFileForRequiredFields(self):
+    all_good = True
+    with open(self.path_to_image_details, 'r') as f:
+        dr = DictReader(f)
+        all_good = all_good & ('cid' in dr.fieldnames) \
+                            & ('eye' in dr.fieldnames) \
+                            & ('tt present' in dr.fieldnames) \
+                              & ('tt sev' in dr.fieldnames) \
+                                & ('n lashes touching' in dr.fieldnames) \
+                                  & ('epilation sev' in dr.fieldnames) \
+                                    & ('image path' in dr.fieldnames) \
+                                      & ('segmentation path' in dr.fieldnames) \
+                                        & ('patches path' in dr.fieldnames)
+    return all_good
+
+#------------------------------------------------------------------------------
+  def addOptionalKey(self, row, key):
+    if key not in row:
+      row[key] = 0
+    else:
+      row[key] = int(row[key])
+
+#------------------------------------------------------------------------------
+  def createMasterDict(self, image_list):
+    # Make sure that image path and segmentation path are not empty
+    # update the paths to be absolute
+    # create a temp version of the output master file (time stamped)
+    new_output_dir = self.path_to_image_details.parent / ('Patches_' + self.user_name)
+    if not new_output_dir.is_dir():
+        new_output_dir.mkdir(parents=True)
+    for row in image_list:
+      if len(row['image path']) ==0 or len(row['segmentation path']) == 0:
+        logging.error('Found an empty Image path or Segmentation path in the master file')
+        self.image_list = []
+        break
+      row['image path'] = self.path_to_server / row['image path']
+      row['segmentation path'] = self.path_to_server / row['segmentation path']
+      if len(row['patches path']) > 0:
+        row['patches path'] = self.path_to_server / row['patches path']
+      else:
+        image_name = (row['image path'].name).split('.')[0]
+        row['patches path'] = new_output_dir / (image_name + '.csv')
+      try:
+        row['tt present'] = int(row['tt present'])
+        row['tt sev'] = int(row['tt sev'])
+        row['n lashes touching'] = int(row['n lashes touching'])
+        row['epilation sev'] = int(row['epilation sev'])
+      
+        # Add any missing keys and initialize a temp file.
+        self.addOptionalKey(row, 'verified')
+        self.addOptionalKey(row, 'blurry')
+        self.addOptionalKey(row, 'mislabeled')
+        self.addOptionalKey(row, 'n samples')
+        self.addOptionalKey(row, 'n tt')
+        self.addOptionalKey(row, 'n epi')
+        self.addOptionalKey(row, 'n none')
+        self.addOptionalKey(row, 'n healthy')
+      except Exception as e:
+        logging.error('Error either converting keys to in or adding other keys')
+        self.image_list = []
+        break
+      self.image_list.append(row)
+    print('Number of images wrote: {}'.format(len(self.image_list)))
+    # create a time stamped temp file
+    if len(self.image_list) > 0:
+      csv_file_name = self.path_to_image_details.name
+      from datetime import datetime
+      curDTObj = datetime.now()
+      datetimeStr = curDTObj.strftime("%Y%m%d_%H%M%S")
+      csv_file_name = csv_file_name.replace('.csv', '_{}.csv'.format(datetimeStr))
+      self.tmp_csv_file_name = self.path_to_image_details.parent / csv_file_name
+      fieldnames = self.image_list[0].keys()
+      print('TEMP FILE NAME IS: {}'.format(self.tmp_csv_file_name))
+      with open(self.tmp_csv_file_name, 'w') as fh:
+        writer = DictWriter(fh, fieldnames = fieldnames)
+        writer.writeheader()
+
+#------------------------------------------------------------------------------
+  def fillMasterTable(self):
+    if self.image_list is None or len(self.image_list) == 0:
+      logging.debug('Image list is empty')
+      return
+    checkboxKeys = ['verified', 'blurry','mislabeled']
+    keys = checkboxKeys
+    all_other = [key for key in self.image_list[0].keys() if key not in keys]
+    keys.extend(all_other)
+    self.ui.imageDetailsTable.enabled = 1
+    print('Trying to create headers: {}'.format(keys))
+    for key in keys:
+      self.ui.imageDetailsTable.setColumnCount(len(keys))
+      self.ui.imageDetailsTable.setHorizontalHeaderLabels(keys)
+      self.ui.imageDetailsTable.horizontalHeader().setVisible(True)
+
+    for row in self.image_list:
+      row_id = self.ui.imageDetailsTable.rowCount
+      self.ui.imageDetailsTable.insertRow(row_id)
+      for ind, key in enumerate(keys): # Get in particular oder
+        print('{} {} {}'.format(ind, key, row[key]))
+        item = qt.QTableWidgetItem("{}".format(row[key]))
+        self.ui.imageDetailsTable.setItem(row_id, ind, item)
+
 #------------------------------------------------------------------------------
 #------------------------------------------------------------------------------
   def onViewSelect(self, layoutIndex):
@@ -427,113 +559,91 @@ class TTSegToolSlicelet(VTKObservationMixin):
   #------------------------------------------------------------------------------  
   def onImageIndexChanged(self, scroll_pos):
     self.saveCurrentImagePatchInfo()
+    self.saveCurrentRowToMaster()
     self.current_ind = scroll_pos-1
     self.updateNavigationUI()
     if self.current_ind >=0 and len(self.image_list) > 0:
       self.showImageAtCurrentInd()
-      if self.path_to_segmentations is not None:
-        self.loadCurrentSegmentation()
+      self.loadCurrentSegmentation()
     self.updatePatchesTable(clearTable=True)
     self.loadExistingPatches()
 
+### Data processing ######
 #------------------------------------------------------------------------------
 #------------------------------------------------------------------------------  
-  def initData(self, clearScene = False):
-    self.image_list=[]
-    self.current_ind = -1
-
-    if self.ui is not None and self.ui.imagePatchesTableWidget is not None:
-      for row in range(self.ui.imagePatchesTableWidget.rowCount):
-            self.ui.imagePatchesTableWidget.removeRow(row)
-    fid = slicer.modules.markups.logic().GetActiveListID()
-    if len(fid) > 0:
-      fidNode = slicer.util.getNode(fid)
-      for row in range(fidNode.GetNumberOfFiducials()):
-        fidNode.RemoveNthControlPoint(0)
-    if self.image_node is not None:
-      utility.MRMLUtility.removeMRMLNode(self.image_node)
-    if self.segmentation_node is not None:
-      utility.MRMLUtility.removeMRMLNode(self.segmentation_node)
-      utility.MRMLUtility.removeMRMLNode(self.segmentation_editor_node)
-    self.updateNavigationUI()
-
-#------------------------------------------------------------------------------
-#------------------------------------------------------------------------------  
-  def getCurrentPatchFileName(self):
+  def getCurrentPatchFilePath(self):
     if self.image_list is not None and len(self.image_list) > 0 and self.current_ind in range( len(self.image_list)):
-      image_name = self.image_list[self.current_ind]
-      csv_file_name = image_name + '_patches.csv'
-      return csv_file_name
+      patch_file_path = self.image_list[self.current_ind]['patches path']
+      return patch_file_path
     else:
       return None
 
 #------------------------------------------------------------------------------
 #------------------------------------------------------------------------------  
-  def getCurrentSegmentationFileName(self, ind=None):
+  def getCurrentSegmentationFilePath(self, ind=None):
     if self.image_list is not None and len(self.image_list) > 0 and (self.current_ind in range( len(self.image_list)) or ind is not None):
       if ind is None:
         ind = self.current_ind
-      image_name = self.image_list[ind]
-      segmentation_file_name = image_name + '.nrrd'
-      return segmentation_file_name
+      segmentation_file_path = self.image_list[ind]['segmentation path']
+      return segmentation_file_path
     else:
       return None
+
+#------------------------------------------------------------------------------
+#------------------------------------------------------------------------------  
+  def findNextNonVerifiedInd(self):
+    if self.image_list is None or \
+        self.current_ind not in range(len(self.image_list)):
+      return
+    first_ind = self.current_ind
+    if 'verified' in self.image_list[first_ind].keys():
+      for ind, row in enumerate(self.image_list):
+        if row['verified'] == 0:
+          first_ind = ind
+          break
+    self.current_ind = first_ind
+    return first_ind
 
 #------------------------------------------------------------------------------
 #------------------------------------------------------------------------------  
   def startProcessingFiles(self):
-    if self.path_to_images and len(self.image_list) > 0:
+    if len(self.image_list) > 0:
       found_at_least_one = False
-      for name in self.image_list:
-        imgpath = self.path_to_images/ (name+'.jpg')
-        if imgpath.exists():
+      # TODO: Change this to iterate throught the MASTER IMAGE DETAILS
+      for row in self.image_list:
+        image_path = row['image path']
+        seg_path = row['segmentation path']
+        if image_path.exists() and seg_path.exists():
           found_at_least_one = True
           break
-      
+
       if found_at_least_one:
+        # Find the first index of the verified.
         self.current_ind = 0
+        self.findNextNonVerifiedInd()
         self.updateNavigationUI()
         self.showImageAtCurrentInd()
+        self.loadCurrentSegmentation()
       else:
-        slicer.util.errorDisplay("Couldn't find images from the list in directory: {}".format(self.path_to_image_list))
+        slicer.util.errorDisplay("Couldn't find images from the list in directory: {}".format(self.path_to_image_details))
 
-  def startLoadingSegmentations(self):
-    if self.path_to_segmentations and len(self.image_list) > 0:
-      found_at_least_one = False
-      for ind in range(len(self.image_list)):
-        imgpath = self.path_to_segmentations / self.getCurrentSegmentationFileName(ind=ind)
-        if imgpath.exists():
-          found_at_least_one = True
-          break
-      
-      if found_at_least_one:
-        if self.ui is not None:
-          self.changeSegmentationVisibility(self.ui.showSegmentationCheckBox.isChecked())
-
-        if self.current_ind >= 0:
-          self.loadCurrentSegmentation()
-        else:
-          if self.path_to_images and len(self.image_list) > 0:
-            self.current_ind = 0
-            self.updateNavigationUI()
-            self.showImageAtCurrentInd()
-            self.loadCurrentSegmentation()
-      else:
-        slicer.util.errorDisplay("Couldn't find images from the list in directory: {}".format(self.path_to_image_list))
-
+#------------------------------------------------------------------------------
+#------------------------------------------------------------------------------  
   def loadCurrentSegmentation(self):
-    if len(self.image_list) == 0 or self.path_to_image_list is None: 
+    if len(self.image_list) == 0 or self.path_to_image_details is None: 
       slicer.util.errorDisplay('Show image at current IND: Need to chose an image list and path to the images - make sure those are in')
       return
-    if self.current_ind < 0 or self.current_ind >= len(self.image_list):
+    if self.current_ind < 0 not in range(len(self.image_list)):
       slicer.util.warningDisplay("Wrong image index: {}".format(self.current_ind))
     
-    imgpath = self.path_to_segmentations /  self.getCurrentSegmentationFileName()
+    imgpath = self.image_list[self.current_ind]['segmentation path']
     try:
       if self.segmentation_node is not None:
         utility.MRMLUtility.removeMRMLNode(self.segmentation_node)
         utility.MRMLUtility.removeMRMLNode(self.segmentation_editor_node)
-      #utility.MRMLUtility.loadMRMLNode('image_node', self.path_to_images, self.image_list[self.current_ind] + '.jpg', 'VolumeFile') 
+      #utility.MRMLUtility.loadMRMLNode('image_node', self.path_to_server, self.image_list[self.current_ind] + '.jpg', 'VolumeFile') 
+      # TODO: Rename the segmentations to EyeBall and Pupil
+
       self.segmentation_node = slicer.util.loadSegmentation(str(imgpath))
       dn = self.segmentation_node.GetDisplayNode()
       dn.SetVisibility2DOutline(0)
@@ -555,17 +665,17 @@ class TTSegToolSlicelet(VTKObservationMixin):
 #------------------------------------------------------------------------------
 #------------------------------------------------------------------------------  
   def showImageAtCurrentInd(self):
-    if len(self.image_list) == 0 or self.path_to_image_list is None:
-      slicer.util.errorDisplay('Show image at current IND: Need to chose an image list and path to the images - make sure those are in')
+    if len(self.image_list) == 0 or self.path_to_image_details is None:
+      slicer.util.errorDisplay('Show image at current IND: Need to chose an image list - make sure those are in')
       return
-    if self.current_ind < 0 or self.current_ind >= len(self.image_list):
+    if self.current_ind not in range(len(self.image_list)):
       slicer.util.warningDisplay("Wrong image index: {}".format(self.current_ind))
-    
-    imgpath = self.path_to_images / (self.image_list[self.current_ind] + '.jpg')
+
+    imgpath =  self.image_list[self.current_ind]['image path']
     try:
       if self.image_node is not None:
         utility.MRMLUtility.removeMRMLNode(self.image_node)
-      #utility.MRMLUtility.loadMRMLNode('image_node', self.path_to_images, self.image_list[self.current_ind] + '.jpg', 'VolumeFile') 
+      #utility.MRMLUtility.loadMRMLNode('image_node', self.path_to_server, self.image_list[self.current_ind] + '.jpg', 'VolumeFile') 
       self.image_node = slicer.util.loadVolume(str(imgpath), {'singleFile':True})
     except Exception as e:
       slicer.util.errorDisplay("Couldn't load imagepath: {}\n ERROR: {}".format(imgpath, e))
@@ -574,21 +684,20 @@ class TTSegToolSlicelet(VTKObservationMixin):
 #------------------------------------------------------------------------------  
   def loadExistingPatches(self):
     if len(self.image_list) == 0 or \
-       self.path_to_images is None or \
+       self.path_to_server is None or \
         self.current_ind < 0 or self.current_ind >= len(self.image_list):
-      logging.warning('Cannot load existincg patch info: Select a valid csv file and point to a correct folder with images')
+      logging.info('Cannot load existincg patch info: Select a valid csv file and point to a correct folder with images')
       return
 
     if self.ui.imagePatchesTableWidget is None:
       logging.warning('Image Patches table is None, returning from saveCurrentImagePatchInfo')
       return
 
-    csv_file_name = self.getCurrentPatchFileName()
-    if csv_file_name is None:
+    csv_file_path = self.getCurrentPatchFilePath()
+    if csv_file_path is None:
       logging.warining('Error getting the name of the patches file, returning')
       return
 
-    csv_file_path = self.path_to_images / csv_file_name
     if csv_file_path.exists():
       logging.info('Attempting to read existing patches file')
       try:
@@ -600,7 +709,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
             # Adding row to the table will also update the combo box
             row_id = self.addPatchRow(ijk, label=row['label'])
             logging.debug('Added row: {}, ijk: {}, label: {}'.format(row_id, ijk, row['label']))
-            logging.debug('Combobox label: {}, table label: {}'.format(self.ui.patchLabelComboBox.currentText,  self.ui.imagePatchesTableWidget.item(row_id, 2).text()))
+            logging.debug('Combobox label: {}, table label: {}'.format(self.ui.patchLabelComboBox.currentText,  self.ui.imagePatchesTableWidget.item(row_id, 1).text()))
             if row_id is not None:
               # Get physical coordinates from voxel coordinates
               volumeIjkToRas = vtk.vtkMatrix4x4()
@@ -613,8 +722,8 @@ class TTSegToolSlicelet(VTKObservationMixin):
               point_Ras = transformVolumeRasToRas.TransformPoint(point_VolumeRas[0:3])
               self.addFiducial(row_id=row_id, ras=point_Ras)
               logging.debug('After adding fiducial: ')
-              logging.debug('Combobox label: {}, table label: {}'.format(self.ui.patchLabelComboBox.currentText,  self.ui.imagePatchesTableWidget.item(row_id, 2).text()))
-              self.updateFiducialSelection(row_id, 2, row_id, 2)
+              logging.debug('Combobox label: {}, table label: {}'.format(self.ui.patchLabelComboBox.currentText,  self.ui.imagePatchesTableWidget.item(row_id, 1).text()))
+              self.updateFiducialSelection(row_id)
 
       except IOError as e:
         logging.warning("Couldn't read the patches file {}, clearing the widget table: \n {}".format(csv_file_path, e))
@@ -624,11 +733,46 @@ class TTSegToolSlicelet(VTKObservationMixin):
         self.updatePatchesTable(clearTable=True)
 
 #------------------------------------------------------------------------------
+#------------------------------------------------------------------------------
+  def writeFinalMasterCSV(self):
+    if len(self.image_list) > 0 and self.path_to_server is not None:
+      with open(self.path_to_image_details, 'w') as fh:
+        fieldnames = self.image_list[0].keys()
+        writer = DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in self.image_list:
+          row['image path'] = row['image path'].relative_to(self.path_to_server)
+          row['segmentation path'] = row['segmentation path'].relative_to(self.path_to_server)
+          row['patches path'] = row['patches path'].relative_to(self.path_to_server)
+        writer.writerows(self.image_list)
+
+#------------------------------------------------------------------------------
+#------------------------------------------------------------------------------
+  def saveCurrentRowToMaster(self):
+    print('Trying to write the row {} to: {}, len: {}'.format(self.current_ind, self.tmp_csv_file_name, len(self.image_list)))
+    if self.tmp_csv_file_name is not None and \
+      len(self.image_list) > 0 and \
+      self.current_ind in range(len(self.image_list)):
+      print('Trying to write the row: {}'.format(self.image_list[self.current_ind]))
+      fieldnames = self.image_list[self.current_ind].keys()
+      writeheader = False
+      if not self.tmp_csv_file_name.exists():
+        writeheader = True
+      try:
+        with open(self.tmp_csv_file_name, 'a+') as fh:
+          writer = DictWriter(fh, fieldnames = fieldnames)
+          if writeheader:
+            writer.writeheader()
+          writer.writerow(self.image_list[self.current_ind])
+      except Exception as e:
+        logging.warning('Error writing the row {} to csv {}'.format(self.current_ind, self.tmp_csv_file_name))
+
+#------------------------------------------------------------------------------
 #------------------------------------------------------------------------------  
   def saveCurrentImagePatchInfo(self):
     if len(self.image_list) == 0 or \
-       self.path_to_images is None or \
-        self.current_ind < 0 or self.current_ind >= len(self.image_list):
+       self.path_to_server is None or \
+        self.current_ind not in range(len(self.image_list)):
       logging.warning('Cannot save current patch info: Select a valid csv file and point to a correct folder with images')
       return
 
@@ -641,10 +785,10 @@ class TTSegToolSlicelet(VTKObservationMixin):
     try:
       for row in range(numrows):
         csv_row = {}
-        text = self.ui.imagePatchesTableWidget.item(row, 1).text()
+        text = self.ui.imagePatchesTableWidget.item(row, 0).text()
         csv_row['x'] = text.split(',')[0]
         csv_row['y'] = text.split(',')[1]
-        csv_row['label'] = self.ui.imagePatchesTableWidget.item(row, 2).text()
+        csv_row['label'] = self.ui.imagePatchesTableWidget.item(row, 1).text()
         csv_file_rows.append(csv_row)
     except Exception as e:
       logging.error('Error parsing the table widget: \n {}'.format(e))
@@ -654,12 +798,10 @@ class TTSegToolSlicelet(VTKObservationMixin):
       logging.info('No rows were parsed from the Patches Table, nothing to save: returning')
       return
 
-    csv_file_name = self.getCurrentPatchFileName()
-    if csv_file_name is None:
+    csv_file_path = self.getCurrentPatchFilePath()
+    if csv_file_path is None:
       logging.warining('Error getting the name of the patches file, returning')
       return
-
-    csv_file_path = self.path_to_images / csv_file_name
     try:
       with open(csv_file_path, 'w') as fh:
         writer = DictWriter(fh, csv_file_rows[0].keys())
@@ -669,18 +811,20 @@ class TTSegToolSlicelet(VTKObservationMixin):
     except IOError as e:
       logging.error('Error writing the csv file: {} \n  {}'.format(csv_file_path, e))
 
-  def updateFiducialSelection(self, row, col, prevrow, prevcol):
+#------------------------------------------------------------------------------
+#------------------------------------------------------------------------------  
+  def updateFiducialSelection(self, row):
     logging.debug('In updatefiducial selection')
     if row not in range(self.ui.imagePatchesTableWidget.rowCount):
       return
 
     comboBoxLabel = self.ui.patchLabelComboBox.currentText
-    tableLabel = self.ui.imagePatchesTableWidget.item(row, 2).text()
+    tableLabel = self.ui.imagePatchesTableWidget.item(row, 1).text()
     logging.debug('Combobox label: {}, tablelabel: {}'.format(comboBoxLabel, tableLabel))
     if tableLabel != comboBoxLabel:
       all_labels = [self.ui.patchLabelComboBox.itemText(i) for i in range(self.ui.patchLabelComboBox.count)]
       if tableLabel not in all_labels:
-        logging.warning('During adding row to patch table at row: {}, label: {} is marked unknown'.format(row, tableLabel))
+        logging.info('During adding row to patch table at row: {}, label: {} is marked unknown'.format(row, tableLabel))
         tableLabel = "Unknown"
       label_id = all_labels.index(tableLabel)
       self.ui.patchLabelComboBox.setCurrentIndex(label_id)
@@ -783,66 +927,6 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
   def onSliceletClosed(self):
     logging.debug('Slicelet closed')
 
-# #
-# # TTSegToolLogic
-# #
-
-# class TTSegToolLogic(ScriptedLoadableModuleLogic):
-#   """This class should implement all the actual
-#   computation done by your module.  The interface
-#   should be such that other python code can import
-#   this class and make use of the functionality without
-#   requiring an instance of the Widget.
-#   Uses ScriptedLoadableModuleLogic base class, available at:
-#   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
-#   """
-
-#   def __init__(self):
-#     """
-#     Called when the logic class is instantiated. Can be used for initializing member variables.
-#     """
-#     ScriptedLoadableModuleLogic.__init__(self)
-
-#   def setDefaultParameters(self, parameterNode):
-#     """
-#     Initialize parameter node with default settings.
-#     """
-#     if not parameterNode.GetParameter("Threshold"):
-#       parameterNode.SetParameter("Threshold", "100.0")
-#     if not parameterNode.GetParameter("Invert"):
-#       parameterNode.SetParameter("Invert", "false")
-
-#   def process(self, inputVolume, outputVolume, imageThreshold, invert=False, showResult=True):
-#     """
-#     Run the processing algorithm.
-#     Can be used without GUI widget.
-#     :param inputVolume: volume to be thresholded
-#     :param outputVolume: thresholding result
-#     :param imageThreshold: values above/below this threshold will be set to 0
-#     :param invert: if True then values above the threshold will be set to 0, otherwise values below are set to 0
-#     :param showResult: show output volume in slice viewers
-#     """
-
-#     if not inputVolume or not outputVolume:
-#       raise ValueError("Input or output volume is invalid")
-
-#     import time
-#     startTime = time.time()
-#     logging.info('Processing started')
-
-#     # Compute the thresholded output volume using the "Threshold Scalar Volume" CLI module
-#     cliParams = {
-#       'InputVolume': inputVolume.GetID(),
-#       'OutputVolume': outputVolume.GetID(),
-#       'ThresholdValue' : imageThreshold,
-#       'ThresholdType' : 'Above' if invert else 'Below'
-#       }
-#     cliNode = slicer.cli.run(slicer.modules.thresholdscalarvolume, None, cliParams, wait_for_completion=True, update_display=showResult)
-#     # We don't need the CLI module node anymore, remove it to not clutter the scene with it
-#     slicer.mrmlScene.RemoveNode(cliNode)
-
-#     stopTime = time.time()
-#     logging.info('Processing completed in {0:.2f} seconds'.format(stopTime-startTime))
 
 #
 # TTSegToolTest
