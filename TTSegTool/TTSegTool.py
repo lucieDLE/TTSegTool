@@ -25,7 +25,7 @@ class TTSegToolSliceletWidget:
       except Exception as e:
         import traceback
         traceback.print_exc(
-        logging.error("There is no parent to TTSegToolSliceletWidget!")
+        logging.error("There is no parent to TTSegToolSliceletWidget!"))
 
 class SliceletMainFrame(qt.QDialog):
     def setSlicelet(self, slicelet):
