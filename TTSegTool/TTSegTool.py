@@ -435,7 +435,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
   #---------------------------------------------------------
     def checkMasterFileForRequiredFields(self):
       all_good = True
-      with open(self.path_to_image_details, 'r') as f:
+      with open(self.path_to_image_details, 'r', newline='') as f:
           dr = DictReader(f)
           all_good = all_good & ('cid' in dr.fieldnames) \
                               & ('eye' in dr.fieldnames) \
@@ -536,8 +536,8 @@ class TTSegToolSlicelet(VTKObservationMixin):
         self.tmp_csv_file_name = self.path_to_image_details.parent / csv_file_name
         fieldnames = self.image_list[0].keys()
         logging.debug('TEMP FILE NAME IS: {}'.format(self.tmp_csv_file_name))
-        with open(self.tmp_csv_file_name, 'w') as fh:
-          writer = DictWriter(fh, fieldnames = fieldnames, newline=' ')
+        with open(self.tmp_csv_file_name, 'w', newline='') as fh:
+          writer = DictWriter(fh, fieldnames = fieldnames)
           writer.writeheader()
 
   #------------------------------------------------------------------------------
@@ -778,7 +778,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
           logging.debug('Either the file does not exist, or not csv, can;t read')
           return
         rows = []
-        with open(file_path, 'r') as fh:
+        with open(file_path, 'r', newline='') as fh:
           reader = DictReader(fh)
           rows = [row for row in reader]
         return rows
@@ -851,9 +851,9 @@ class TTSegToolSlicelet(VTKObservationMixin):
         csv_file_name = csv_file_name.replace('.csv', '_{}.csv'.format(self.ui.usernameLineEdit.text))
         path = self.path_to_image_details.parent / csv_file_name
         try:
-          with open(path, 'w') as fh:
+          with open(path, 'w', newline='') as fh:
             fieldnames = self.image_list[0].keys()
-            writer = DictWriter(fh, fieldnames=fieldnames, newline=' ')
+            writer = DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
             for row in self.image_list:
               row['image path'] = row['image path'].relative_to(self.path_to_server)
@@ -903,8 +903,8 @@ class TTSegToolSlicelet(VTKObservationMixin):
         logging.warining('Error getting the name of the patches file, returning')
         return
       try:
-        with open(csv_file_path, 'w') as fh:
-          writer = DictWriter(fh, csv_file_rows[0].keys(), newline=' ')
+        with open(csv_file_path, 'w', newline='') as fh:
+          writer = DictWriter(fh, csv_file_rows[0].keys())
           writer.writeheader()
           writer.writerows(csv_file_rows)
         logging.info('Wrote the patches file: {}'.format(csv_file_path))
@@ -949,8 +949,8 @@ class TTSegToolSlicelet(VTKObservationMixin):
         if not self.tmp_csv_file_name.exists():
           writeheader = True
         try:
-          with open(self.tmp_csv_file_name, 'a+') as fh:
-            writer = DictWriter(fh, fieldnames = fieldnames,newline=' ')
+          with open(self.tmp_csv_file_name, 'a+', newline='') as fh:
+            writer = DictWriter(fh, fieldnames = fieldnames)
             if writeheader:
               writer.writeheader()
             writer.writerow(self.image_list[self.current_ind])
