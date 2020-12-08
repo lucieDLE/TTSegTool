@@ -1142,8 +1142,8 @@ class TTSegToolTest(ScriptedLoadableModuleTest):
 
       self.delayDisplay('Test passed')
 
-    def onSliceletClosed():
-      logging.info('Closing the slicelet')
+def onSliceletClosed():
+    logging.info('Closing the slicelet')
 
   #
   # Main
@@ -1165,3 +1165,4 @@ if __name__ == "__main__":
     mainFrame.windowIcon = qt.QIcon(iconPath)
     # mainFrame = qt.QFrame()
     slicelet = TTSegToolSlicelet(mainFrame, resourcePath=os.path.join(os.path.dirname(__file__), 'Resources/UI/TTSegTool.ui'))
+
