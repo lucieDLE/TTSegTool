@@ -24,7 +24,7 @@ class TTSegToolSliceletWidget:
 
       except Exception as e:
         import traceback
-        traceback.print_exc()
+        traceback.print_exc(
         logging.error("There is no parent to TTSegToolSliceletWidget!")
 
 class SliceletMainFrame(qt.QDialog):
@@ -537,7 +537,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
         fieldnames = self.image_list[0].keys()
         logging.debug('TEMP FILE NAME IS: {}'.format(self.tmp_csv_file_name))
         with open(self.tmp_csv_file_name, 'w') as fh:
-          writer = DictWriter(fh, fieldnames = fieldnames)
+          writer = DictWriter(fh, fieldnames = fieldnames, newline=' ')
           writer.writeheader()
 
   #------------------------------------------------------------------------------
@@ -853,7 +853,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
         try:
           with open(path, 'w') as fh:
             fieldnames = self.image_list[0].keys()
-            writer = DictWriter(fh, fieldnames=fieldnames)
+            writer = DictWriter(fh, fieldnames=fieldnames, newline=' ')
             writer.writeheader()
             for row in self.image_list:
               row['image path'] = row['image path'].relative_to(self.path_to_server)
@@ -904,7 +904,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
         return
       try:
         with open(csv_file_path, 'w') as fh:
-          writer = DictWriter(fh, csv_file_rows[0].keys())
+          writer = DictWriter(fh, csv_file_rows[0].keys(), newline=' ')
           writer.writeheader()
           writer.writerows(csv_file_rows)
         logging.info('Wrote the patches file: {}'.format(csv_file_path))
@@ -950,7 +950,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
           writeheader = True
         try:
           with open(self.tmp_csv_file_name, 'a+') as fh:
-            writer = DictWriter(fh, fieldnames = fieldnames)
+            writer = DictWriter(fh, fieldnames = fieldnames,newline=' ')
             if writeheader:
               writer.writeheader()
             writer.writerow(self.image_list[self.current_ind])
