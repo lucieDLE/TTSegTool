@@ -74,6 +74,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
 
     #------------------------------------------------------------------------------
     def disconnect(self):
+      self.updateMasterDictAndTable()
       self.saveCurrentImagePatchInfo()
       self.saveCurrentRowToMaster()
       self.writeFinalMasterCSV()
@@ -91,7 +92,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
       self.ui.imageNavigationScrollBar.setTracking(False)
       self.ui.imageNavigationScrollBar.valueChanged.connect(self.onImageIndexChanged)
       self.ui.findUngradedButton.clicked.connect(self.onFindUngradedClicked)
-      # self.ui.imagePatchesTableWidget.currentCellChanged.connect(self.onImageDetailsRowChanged)
+      self.ui.imageDetailsTable.itemClicked.connect(self.onImageDetailsRowClicked)
       # Patch management
       self.ui.keepPatchPushButton.clicked.connect(self.onSavePatchesButtonClicked)
       self.ui.delPatchPushButton.clicked.connect(self.onDelPatchClicked)
@@ -239,7 +240,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
       # Check the IJK and RAS is non-empty
       if ijk is None:
         return None
-      
+
       row_id = self.ui.imagePatchesTableWidget.rowCount
       self.ui.imagePatchesTableWidget.insertRow(row_id)
       item1 = qt.QTableWidgetItem("{},{}".format(ijk[0], ijk[1]))
@@ -263,7 +264,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
       # current row while updating the fiducial labels. (callback on index change for combo box)
       if label_id is not None:
         self.ui.patchLabelComboBox.setCurrentIndex(label_id)
-      
+
       return row_id
 
   #------------------------------------------------------------------------------
@@ -328,11 +329,13 @@ class TTSegToolSlicelet(VTKObservationMixin):
           fidNode.RemoveNthControlPoint(row)
       if self.ui.imagePatchesTableWidget.rowCount > 0:
         self.ui.imagePatchesTableWidget.selectRow( self.ui.imagePatchesTableWidget.rowCount - 1)
+      print('Before updating master: {}'.format(self.ui.imagePatchesTableWidget.rowCount))
+      self.updateMasterDictAndTable()
 
     #------------------------------------------------------------------------------
     #------------------------------------------------------------------------------
     def OnClick(self, caller, event):
-      print('Inside the onclick')
+      logging.debug('Inside the onclick')
       if len(self.image_list) == 0 or \
         self.path_to_server is None or \
           self.current_ind not in range(len(self.image_list)):
@@ -362,6 +365,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
             ijkFloat = xyToIJK.TransformDoublePoint(xyz)
             ijk = [_roundInt(value) for value in ijkFloat]
             self.updatePatchesTable(ijk=ijk, ras=ras)
+            self.updateMasterDictAndTable()
         else:
           logging.debug('Something wrong with sliceNode: {}'.format(sliceNode))
 
@@ -397,16 +401,16 @@ class TTSegToolSlicelet(VTKObservationMixin):
     def loadData(self):
       # read the excl sheet, and convert to dict
       if len(self.ui.usernameLineEdit.text) == 0:
-        slicer.utils.errorDisplay("Pleae provide a username")
+        slicer.util.errorDisplay("Pleae provide a username", parent=self.parent)
         return
       if self.path_to_image_details is None:
-        slicer.utils.errorDisplay('Please provide a valid Master CSV File')
+        slicer.util.errorDisplay('Please provide a valid Master CSV File', parent=self.parent)
         return
       if self.path_to_server is None:
-        slicer.utils.errorDisplay('Please provide a valid server path ')
+        slicer.util.errorDisplay('Please provide a valid server path ', parent=self.parent)
         return
       if not self.checkMasterFileForRequiredFields():
-        slicer.utils.errorDisplay('Did not find the fields that are at least required')
+        slicer.util.errorDisplay('Did not find the fields that are at least required', parent=self.parent)
 
       logging.info('Found the required fields in the master file! Loading')
       try:
@@ -414,14 +418,14 @@ class TTSegToolSlicelet(VTKObservationMixin):
         self.initData()
         self.updateUI()
         image_list = None
-        with open(self.path_to_image_details, 'r') as f:
-          dr = DictReader(f)
-          image_list = [row for row in dr]
+        image_list = self.readCSV(self.path_to_image_details)
+        if len(image_list) == 0:
+          raise IOError('Error reading the Master CSV File')
         self.createMasterDict(image_list)
       except Exception as e:
-        slicer.util.errorDisplay("Error processing input csv \n ERROR:  {}".format(e))
+        slicer.util.errorDisplay("Error processing input csv \n ERROR:  {}".format(e), parent=self.parent)
         self.ui.imageFileButton.setText("Not Selected")
-      slicer.util.infoDisplay( "Found a list of {} images".format(len(self.image_list)))
+      slicer.util.infoDisplay("Found a list of {} images".format(len(self.image_list)), parent=self.parent)
       if len(self.image_list) > 0:
         self.startProcessingFiles()
         self.ui.inputsCollapsibleButton.collapsed = True
@@ -459,18 +463,35 @@ class TTSegToolSlicelet(VTKObservationMixin):
       new_output_dir = self.path_to_image_details.parent / ('Patches_' + self.user_name)
       if not new_output_dir.is_dir():
           new_output_dir.mkdir(parents=True)
-      for row in image_list:
+      progress = qt.QProgressDialog("Loading Master CSV", "Abort Load", 0, len(image_list), self.parent)
+      # progress.setWindowModality(qt.Qt.WindowModal)
+
+      for row_id, row in enumerate(image_list):
+        progress.setValue(row_id)
+        if progress.wasCanceled:
+          break
+
         if len(row['image path']) ==0 or len(row['segmentation path']) == 0:
           logging.error('Found an empty Image path or Segmentation path in the master file')
           self.image_list = []
           break
         row['image path'] = self.path_to_server / row['image path']
         row['segmentation path'] = self.path_to_server / row['segmentation path']
+        create_new = False
+        try_to_read_patches = False
         if len(row['patches path']) > 0:
           row['patches path'] = self.path_to_server / row['patches path']
+          if row['patches path'].exists():
+            try_to_read_patches = False
+          else:
+            create_new = True
         else:
+          create_new = True
+
+        if create_new:
           image_name = (row['image path'].name).split('.')[0]
           row['patches path'] = new_output_dir / (image_name + '.csv')
+          try_to_read_patches = True
         try:
           row['tt present'] = int(row['tt present'])
           row['tt sev'] = int(row['tt sev'])
@@ -483,25 +504,38 @@ class TTSegToolSlicelet(VTKObservationMixin):
           self.addOptionalKey(row, 'mislabeled')
           self.addOptionalKey(row, 'n samples')
           self.addOptionalKey(row, 'n tt')
+          self.addOptionalKey(row, 'n predtt')
           self.addOptionalKey(row, 'n epi')
-          self.addOptionalKey(row, 'n none')
           self.addOptionalKey(row, 'n healthy')
+          self.addOptionalKey(row, 'n none')
         except Exception as e:
           logging.error('Error either converting keys to in or adding other keys')
           self.image_list = []
           break
+        if try_to_read_patches and row['patches path'].exists():
+          patch_rows = self.readCSV(row['patches path'])
+          if len(patch_rows) == 0:
+            logging.warning("Error reading pre-existing patches file: {}".format(row['patches path']))
+          row['n samples'] = len(patch_rows)
+          # ["TT", "Predicted TT", "Healthy", "Epilation", "Unknown"]
+          row['n tt'] = len( [l for l in patch_rows if l['label'] == 'TT'] )
+          row['n predtt'] = len( [l for l in patch_rows if l['label'] == 'Predicted TT'] )
+          row['n epi'] = len( [l for l in patch_rows if l['label'] == 'Epilation'] )
+          row['n healthy'] = len( [l for l in patch_rows if l['label'] == 'Healthy'] )
+          row['n healthy'] = len( [l for l in patch_rows if l['label'] == 'Unknown'] )
         self.image_list.append(row)
-      print('Number of images wrote: {}'.format(len(self.image_list)))
+      progress.setValue(len(image_list))
+      logging.debug('Number of images read: {}'.format(len(self.image_list)))
       # create a time stamped temp file
       if len(self.image_list) > 0:
         csv_file_name = self.path_to_image_details.name
         from datetime import datetime
         curDTObj = datetime.now()
         datetimeStr = curDTObj.strftime("%Y%m%d_%H%M%S")
-        csv_file_name = csv_file_name.replace('.csv', '_{}.csv'.format(datetimeStr))
+        csv_file_name = csv_file_name.replace('.csv', '_{}_{}.csv'.format(self.ui.usernameLineEdit.text, datetimeStr))
         self.tmp_csv_file_name = self.path_to_image_details.parent / csv_file_name
         fieldnames = self.image_list[0].keys()
-        print('TEMP FILE NAME IS: {}'.format(self.tmp_csv_file_name))
+        logging.debug('TEMP FILE NAME IS: {}'.format(self.tmp_csv_file_name))
         with open(self.tmp_csv_file_name, 'w') as fh:
           writer = DictWriter(fh, fieldnames = fieldnames)
           writer.writeheader()
@@ -513,7 +547,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
         logging.debug('Image list is empty')
         return
       checkboxKeys = ['graded', 'blurry','mislabeled']
-      keys = checkboxKeys
+      keys = [key for key in checkboxKeys]
       all_other = [key for key in self.image_list[0].keys() if key not in keys]
       keys.extend(all_other)
       self.ui.imageDetailsTable.enabled = 1
@@ -527,13 +561,14 @@ class TTSegToolSlicelet(VTKObservationMixin):
         self.ui.imageDetailsTable.insertRow(row_id)
         for ind, key in enumerate(keys): # Get in particular oder
           if key in checkboxKeys:
-            # checkbox = qt.QCheckbox()
-            # checkbox.setChecked(row[key])
-            # self.ui.imageDetailsTable.setCellWidget(row_id, ind, checkbox)
-            item = qt.QTableWidgetItem("{}".format(row[key]))
-            self.ui.imageDetailsTable.setItem(row_id, ind, item)
+            checkbox = qt.QTableWidgetItem()
+            checkstate = qt.Qt.Unchecked if row[key]==0 else qt.Qt.Checked
+            checkbox.setCheckState(checkstate)
+            checkbox.setTextAlignment(qt.Qt.AlignCenter)
+            self.ui.imageDetailsTable.setItem(row_id, ind, checkbox)
           else:
             item = qt.QTableWidgetItem("{}".format(row[key]))
+            item.setTextAlignment(qt.Qt.AlignCenter)
             self.ui.imageDetailsTable.setItem(row_id, ind, item)
       self.ui.imageDetailsTable.resizeColumnsToContents()
 
@@ -557,9 +592,11 @@ class TTSegToolSlicelet(VTKObservationMixin):
       elif layoutIndex == 7:
         self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutOneUpRedSliceView)
 
+    #------------------------------------------------------------------------------
+    #------------------------------------------------------------------------------
     def changeCurrentImageInd(self, new_ind):
       if self.image_list is None or len(self.image_list) == 0:
-        logging.debug()
+        logging.debug('Image list is empty, nothing to do on image index change')
         return
 
       if new_ind == self.current_ind:
@@ -570,7 +607,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
         logging.debug('The current index is not in range of image list, nothing to do here.')
       else:
         self.saveCurrentImagePatchInfo()
-        # update the current Master row to reflect current patch statistics and other things
+        self.updateMasterDictAndTable()
         self.saveCurrentRowToMaster()
       
       self.current_ind = new_ind
@@ -589,18 +626,8 @@ class TTSegToolSlicelet(VTKObservationMixin):
     #------------------------------------------------------------------------------
     #------------------------------------------------------------------------------  
     def onImageIndexChanged(self, scroll_pos):
-      print('New IND: {}, Self: {}'.format(scroll_pos-1, self.current_ind))
+      logging.debug('New IND: {}, Self: {}'.format(scroll_pos-1, self.current_ind))
       self.changeCurrentImageInd(scroll_pos-1)
-      # self.saveCurrentImagePatchInfo()
-      # # update the current Master row to reflect current patch statistics and other things
-      # self.saveCurrentRowToMaster()
-      # self.current_ind = scroll_pos-1
-      # self.updateNavigationUI()
-      # if self.current_ind >=0 and len(self.image_list) > 0:
-      #   self.showImageAtCurrentInd()
-      #   self.loadCurrentSegmentation()
-      # self.updatePatchesTable(clearTable=True)
-      # self.loadExistingPatches()
 
     #------------------------------------------------------------------------------
     #------------------------------------------------------------------------------  
@@ -608,20 +635,23 @@ class TTSegToolSlicelet(VTKObservationMixin):
       if self.image_list is not None and self.ui is not None\
         and self.current_ind in range(len(self.image_list)):
           new_ind = self.findNextNonGradedInd()
-          print('New IND: {}, Self: {}'.format(new_ind, self.current_ind))
+          logging.debug('New IND: {}, Self: {}'.format(new_ind, self.current_ind))
           self.ui.imageNavigationScrollBar.setValue(new_ind+1)
 
     #------------------------------------------------------------------------------
     #------------------------------------------------------------------------------
-    def onImageDetailsRowChanged(self, row):
+    def onImageDetailsRowClicked(self, item):
       if self.image_list is None or len(self.image_list) == 0 or\
         self.current_ind not in range(len(self.image_list)):
         logging.debug('Row change has no effect, no image details were found')
 
-      if row != self.current_ind:
-        # update the image
-        print('In: onImageDetailsRowChanged: row: {}'.format(row))
-        self.ui.imageNavigationScrollBar.setValue(row+1)
+      row = item.row()
+      col = item.column()
+      if row == self.current_ind:
+        self.ui.imageDetailsTable.selectRow(row)
+      self.ui.imageNavigationScrollBar.setValue(row+1)
+      # if self.ui is not None:
+      #   self.ui.imageDetailsTable.selectRow(self.current_ind)
 
   ### Data processing ######
   #------------------------------------------------------------------------------
@@ -659,7 +689,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
             break
           else:
             if ind == len(self.image_list)-1:
-              slicer.util.infoDisplay(self.parent, "Reached the last image, All graded!!")
+              slicer.util.infoDisplay("Reached the last image, All graded!!", parent=self.parent)
               first_ind = ind
       return first_ind
 
@@ -682,14 +712,14 @@ class TTSegToolSlicelet(VTKObservationMixin):
           # Find the first index of the graded.
           self.changeCurrentImageInd(0)
         else:
-          slicer.util.errorDisplay("Couldn't find images from the list in directory: {}".format(self.path_to_image_details))
+          slicer.util.errorDisplay("Couldn't find images from the list in directory: {}".format(self.path_to_image_details), parent=self.parent)
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------  
     def loadCurrentSegmentation(self):
-      print('in loadCurrentSegmentation')
+      logging.debug('in loadCurrentSegmentation')
       if len(self.image_list) == 0 or self.path_to_image_details is None: 
-        slicer.util.errorDisplay('Show image at current IND: Need to chose an image list and path to the images - make sure those are in')
+        slicer.util.errorDisplay('Show image at current IND: Need to chose an image list and path to the images - make sure those are in', parent=self.parent)
         return
       if self.current_ind < 0 not in range(len(self.image_list)):
         slicer.util.warningDisplay("Wrong image index: {}".format(self.current_ind))
@@ -716,16 +746,18 @@ class TTSegToolSlicelet(VTKObservationMixin):
             self.ui.SegmentEditorWidget.setMasterVolumeNode(self.image_node)
           visibility = self.ui.showSegmentationCheckBox.isChecked()
           dn.SetVisibility(visibility)
+          if self.ui is not None:
+            self.ui.SegmentEditorWidget.setEnabled(visibility)
 
       except Exception as e:
-        slicer.util.errorDisplay("Couldn't load imagepath: {}\n ERROR: {}".format(imgpath, e))
+        slicer.util.errorDisplay("Couldn't load imagepath: {}\n ERROR: {}".format(imgpath, e), parent=self.parent)
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------  
     def showImageAtCurrentInd(self):
       logging.info('In showImageAtCurrentInd')
       if len(self.image_list) == 0 or self.path_to_image_details is None:
-        slicer.util.errorDisplay('Show image at current IND: Need to chose an image list - make sure those are in')
+        slicer.util.errorDisplay('Show image at current IND: Need to chose an image list - make sure those are in', parent=self.parent)
         return
       if self.current_ind not in range(len(self.image_list)):
         slicer.util.warningDisplay("Wrong image index: {}".format(self.current_ind))
@@ -737,7 +769,25 @@ class TTSegToolSlicelet(VTKObservationMixin):
         #utility.MRMLUtility.loadMRMLNode('image_node', self.path_to_server, self.image_list[self.current_ind] + '.jpg', 'VolumeFile') 
         self.image_node = slicer.util.loadVolume(str(imgpath), {'singleFile':True})
       except Exception as e:
-        slicer.util.errorDisplay("Couldn't load imagepath: {}\n ERROR: {}".format(imgpath, e))
+        slicer.util.errorDisplay("Couldn't load imagepath: {}\n ERROR: {}".format(imgpath, e), parent=self.parent)
+
+    #------------------------------------------------------------------------------
+    def readCSV(self, file_path):
+      try:
+        if not file_path.exists() or file_path.suffix != '.csv':
+          logging.debug('Either the file does not exist, or not csv, can;t read')
+          return
+        rows = []
+        with open(file_path, 'r') as fh:
+          reader = DictReader(fh)
+          rows = [row for row in reader]
+        return rows
+      except IOError as e:
+        logging.warning('IO Error reading the CSV FILE: {} \n {}'.format(file_path, e))
+        return []
+      except Exception as e:
+        logging.warning('Other Error reading the CSV FILE: {} \n {}'.format(file_path, e))
+        return []
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------  
@@ -761,9 +811,9 @@ class TTSegToolSlicelet(VTKObservationMixin):
       if csv_file_path.exists():
         logging.info('Attempting to read existing patches file')
         try:
-          with open(csv_file_path, 'r') as fh:
-            reader = DictReader(fh)
-            for row in reader:
+          rows = self.readCSV(csv_file_path)
+          if len(rows) > 0:
+            for row in rows:
               ijk = None
               ijk = [int(row['x']), int(row['y']), 0]
               # Adding row to the table will also update the combo box
@@ -784,6 +834,8 @@ class TTSegToolSlicelet(VTKObservationMixin):
                 logging.debug('After adding fiducial: ')
                 logging.debug('Combobox label: {}, table label: {}'.format(self.ui.patchLabelComboBox.currentText,  self.ui.imagePatchesTableWidget.item(row_id, 1).text()))
                 self.updateFiducialSelection(row_id)
+          else:
+            raise IOError('Error reading the patches file')
         except IOError as e:
           logging.warning("Couldn't read the patches file {}, clearing the widget table: \n {}".format(csv_file_path, e))
           self.updatePatchesTable(clearTable=True)
@@ -795,34 +847,25 @@ class TTSegToolSlicelet(VTKObservationMixin):
   #------------------------------------------------------------------------------
     def writeFinalMasterCSV(self):
       if len(self.image_list) > 0 and self.path_to_server is not None:
-        with open(self.path_to_image_details, 'w') as fh:
-          fieldnames = self.image_list[0].keys()
-          writer = DictWriter(fh, fieldnames=fieldnames)
-          writer.writeheader()
-          for row in self.image_list:
-            row['image path'] = row['image path'].relative_to(self.path_to_server)
-            row['segmentation path'] = row['segmentation path'].relative_to(self.path_to_server)
-            row['patches path'] = row['patches path'].relative_to(self.path_to_server)
-          writer.writerows(self.image_list)
-
-  #------------------------------------------------------------------------------
-  #------------------------------------------------------------------------------
-    def saveCurrentRowToMaster(self):
-      if self.tmp_csv_file_name is not None and \
-        len(self.image_list) > 0 and \
-        self.current_ind in range(len(self.image_list)):
-        fieldnames = self.image_list[self.current_ind].keys()
-        writeheader = False
-        if not self.tmp_csv_file_name.exists():
-          writeheader = True
+        csv_file_name = self.path_to_image_details.name
+        csv_file_name = csv_file_name.replace('.csv', '_{}.csv'.format(self.ui.usernameLineEdit.text))
+        path = self.path_to_image_details.parent / csv_file_name
         try:
-          with open(self.tmp_csv_file_name, 'a+') as fh:
-            writer = DictWriter(fh, fieldnames = fieldnames)
-            if writeheader:
-              writer.writeheader()
-            writer.writerow(self.image_list[self.current_ind])
-        except Exception as e:
-          logging.warning('Error writing the row {} to csv {}'.format(self.current_ind, self.tmp_csv_file_name))
+          with open(path, 'w') as fh:
+            fieldnames = self.image_list[0].keys()
+            writer = DictWriter(fh, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in self.image_list:
+              row['image path'] = row['image path'].relative_to(self.path_to_server)
+              row['segmentation path'] = row['segmentation path'].relative_to(self.path_to_server)
+              row['patches path'] = row['patches path'].relative_to(self.path_to_server)
+            writer.writerows(self.image_list)
+          from shutil import copyfile
+          copyfile(path, self.path_to_image_details)
+        except IOError as e:
+          slicer.util.errorDisplay('ERROR Writing out the master csv file.', parent=self.parent)
+        except KeyError as e:
+          slicer.util.errorDisplay('Error during key parsing for the final write', parent=self.parent)
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------  
@@ -867,6 +910,52 @@ class TTSegToolSlicelet(VTKObservationMixin):
         logging.info('Wrote the patches file: {}'.format(csv_file_path))
       except IOError as e:
         logging.error('Error writing the csv file: {} \n  {}'.format(csv_file_path, e))
+
+  #------------------------------------------------------------------------------
+  #------------------------------------------------------------------------------
+    def updateMasterDictAndTable(self):
+      if self.image_list is None or len(self.image_list) == 0\
+        or self.current_ind not in range(len(self.image_list)):
+        logging.debug('Nothing to update for master table, returning')
+        return
+
+      self.image_list[self.current_ind]['n samples'] = self.ui.imagePatchesTableWidget.rowCount
+      labelColumn = [ self.ui.imagePatchesTableWidget.item(row, 1).text() for row in range(self.ui.imagePatchesTableWidget.rowCount)]
+      self.image_list[self.current_ind]['n tt'] = len( [row for row in labelColumn if row == 'TT'] )
+      self.image_list[self.current_ind]['n predtt'] = len( [row for row in labelColumn if row == 'Predicted TT'] )
+      self.image_list[self.current_ind]['n epi'] = len( [row for row in labelColumn if row == 'Epilation'] )
+      self.image_list[self.current_ind]['n healthy'] = len( [row for row in labelColumn if row == 'Healthy'] )
+      self.image_list[self.current_ind]['n healthy'] = len( [row for row in labelColumn if row == 'Unknown'] )
+
+      # Get the checkbox state.
+      checkboxkeys = ['graded', 'blurry','mislabeled']
+      for columnid in range(self.ui.imageDetailsTable.columnCount):
+        # Save the current state of the table
+        headerlabel = self.ui.imageDetailsTable.horizontalHeaderItem(columnid).text()
+        if headerlabel in checkboxkeys:
+          state = self.ui.imageDetailsTable.item(self.current_ind, columnid).checkState()
+          self.image_list[self.current_ind][headerlabel] = 0 if state==qt.Qt.Unchecked else 1
+        elif headerlabel.startswith('n '):
+          self.ui.imageDetailsTable.item(self.current_ind, columnid).setText('{}'.format(self.image_list[self.current_ind][headerlabel]))
+
+  #------------------------------------------------------------------------------
+  #------------------------------------------------------------------------------
+    def saveCurrentRowToMaster(self):
+      if self.tmp_csv_file_name is not None and \
+        len(self.image_list) > 0 and \
+        self.current_ind in range(len(self.image_list)):
+        fieldnames = self.image_list[self.current_ind].keys()
+        writeheader = False
+        if not self.tmp_csv_file_name.exists():
+          writeheader = True
+        try:
+          with open(self.tmp_csv_file_name, 'a+') as fh:
+            writer = DictWriter(fh, fieldnames = fieldnames)
+            if writeheader:
+              writer.writeheader()
+            writer.writerow(self.image_list[self.current_ind])
+        except Exception as e:
+          logging.warning('Error writing the row {} to csv {}'.format(self.current_ind, self.tmp_csv_file_name))
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------  
