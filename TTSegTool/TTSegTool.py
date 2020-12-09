@@ -58,7 +58,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
       if resourcePath is not None:
         uiWidget = slicer.util.loadUI(resourcePath)
         w = self.parent.width
-        uiWidget.minimumWidth = int(w*0.3)
+        uiWidget.minimumWidth = int(w*0.4)
         self.layout.addWidget(uiWidget)
         self.ui = slicer.util.childWidgetVariables(uiWidget)
         self.setupConnections()
@@ -858,7 +858,10 @@ class TTSegToolSlicelet(VTKObservationMixin):
             for row in self.image_list:
               row['image path'] = row['image path'].relative_to(self.path_to_server)
               row['segmentation path'] = row['segmentation path'].relative_to(self.path_to_server)
-              row['patches path'] = row['patches path'].relative_to(self.path_to_server)
+              if row['patches path'].exists():
+                row['patches path'] = row['patches path'].relative_to(self.path_to_server)
+              else:
+                row['patches path'] = ''
             writer.writerows(self.image_list)
           from shutil import copyfile
           copyfile(path, self.path_to_image_details)
@@ -1041,17 +1044,18 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       """
       Called when the user opens the module the first time and the widget is initialized.
       """
-      ScriptedLoadableModuleWidget.setup(self)
+      self.launchSlicelet()
+      # ScriptedLoadableModuleWidget.setup(self)
 
-      # Show slicelet button
-      showSliceletButton = qt.QPushButton("Show slicelet")
-      showSliceletButton.toolTip = "Launch the slicelet"
-      self.layout.addWidget(qt.QLabel(' '))
-      self.layout.addWidget(showSliceletButton)
-      showSliceletButton.connect('clicked()', self.launchSlicelet)
+      # # Show slicelet button
+      # showSliceletButton = qt.QPushButton("Start TT Segmentation Tool")
+      # showSliceletButton.toolTip = "Launch the slicelet"
+      # self.layout.addWidget(qt.QLabel(' '))
+      # self.layout.addWidget(showSliceletButton)
+      # showSliceletButton.connect('clicked()', self.launchSlicelet)
 
-      # Add vertical spacer
-      self.layout.addStretch(1)
+      # # Add vertical spacer
+      # self.layout.addStretch(1)
 
     def launchSlicelet(self):
       mainFrame = SliceletMainFrame()
