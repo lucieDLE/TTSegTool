@@ -97,7 +97,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
       # Patch management
       self.ui.keepPatchPushButton.clicked.connect(self.onSavePatchesButtonClicked)
       self.ui.delPatchPushButton.clicked.connect(self.onDelPatchClicked)
-      self.ui.patchLabelComboBox.addItems(["TT", "Predicted TT", "Healthy", "Epilation", "Unknown"])
+      self.ui.patchLabelComboBox.addItems(["TT", "Probable TT", "Healthy", "Epilation", "Unknown"])
       self.ui.patchLabelComboBox.currentIndexChanged.connect(self.updateFiducialLabel)
       self.ui.imagePatchesTableWidget.currentCellChanged.connect(self.updateFiducialSelection)
       # segmentation management
@@ -505,7 +505,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
           self.addOptionalKey(row, 'mislabeled')
           self.addOptionalKey(row, 'n samples')
           self.addOptionalKey(row, 'n tt')
-          self.addOptionalKey(row, 'n predtt')
+          self.addOptionalKey(row, 'n probtt')
           self.addOptionalKey(row, 'n epi')
           self.addOptionalKey(row, 'n healthy')
           self.addOptionalKey(row, 'n none')
@@ -518,9 +518,9 @@ class TTSegToolSlicelet(VTKObservationMixin):
           if len(patch_rows) == 0:
             logging.warning("Error reading pre-existing patches file: {}".format(row['patches path']))
           row['n samples'] = len(patch_rows)
-          # ["TT", "Predicted TT", "Healthy", "Epilation", "Unknown"]
+          # ["TT", "Probable TT", "Healthy", "Epilation", "Unknown"]
           row['n tt'] = len( [l for l in patch_rows if l['label'] == 'TT'] )
-          row['n predtt'] = len( [l for l in patch_rows if l['label'] == 'Predicted TT'] )
+          row['n probtt'] = len( [l for l in patch_rows if l['label'] == 'Probable TT'] )
           row['n epi'] = len( [l for l in patch_rows if l['label'] == 'Epilation'] )
           row['n healthy'] = len( [l for l in patch_rows if l['label'] == 'Healthy'] )
           row['n healthy'] = len( [l for l in patch_rows if l['label'] == 'Unknown'] )
@@ -927,7 +927,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
       self.image_list[self.current_ind]['n samples'] = self.ui.imagePatchesTableWidget.rowCount
       labelColumn = [ self.ui.imagePatchesTableWidget.item(row, 1).text() for row in range(self.ui.imagePatchesTableWidget.rowCount)]
       self.image_list[self.current_ind]['n tt'] = len( [row for row in labelColumn if row == 'TT'] )
-      self.image_list[self.current_ind]['n predtt'] = len( [row for row in labelColumn if row == 'Predicted TT'] )
+      self.image_list[self.current_ind]['n probtt'] = len( [row for row in labelColumn if row == 'Probable TT'] )
       self.image_list[self.current_ind]['n epi'] = len( [row for row in labelColumn if row == 'Epilation'] )
       self.image_list[self.current_ind]['n healthy'] = len( [row for row in labelColumn if row == 'Healthy'] )
       self.image_list[self.current_ind]['n healthy'] = len( [row for row in labelColumn if row == 'Unknown'] )
