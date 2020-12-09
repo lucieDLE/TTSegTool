@@ -865,7 +865,6 @@ class TTSegToolSlicelet(VTKObservationMixin):
               else:
                 row['patches path'] = ''
               writer.writerow(row)
-            DictWriter.
           from shutil import copyfile
           copyfile(path, self.path_to_image_details)
         except IOError as e:
@@ -1047,18 +1046,20 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       """
       Called when the user opens the module the first time and the widget is initialized.
       """
-      #self.launchSlicelet()
       ScriptedLoadableModuleWidget.setup(self)
 
-      # Show slicelet button
-      showSliceletButton = qt.QPushButton("Start TT Segmentation Tool")
-      showSliceletButton.toolTip = "Launch the slicelet"
-      self.layout.addWidget(qt.QLabel(' '))
-      self.layout.addWidget(showSliceletButton)
-      showSliceletButton.connect('clicked()', self.launchSlicelet)
+      if not self.developerMode:
+        self.launchSlicelet()
+      else:
+        # Show slicelet button
+        showSliceletButton = qt.QPushButton("Start TT Segmentation Tool")
+        showSliceletButton.toolTip = "Launch the slicelet"
+        self.layout.addWidget(qt.QLabel(' '))
+        self.layout.addWidget(showSliceletButton)
+        showSliceletButton.connect('clicked()', self.launchSlicelet)
 
-      # Add vertical spacer
-      self.layout.addStretch(1)
+        # Add vertical spacer
+        self.layout.addStretch(1)
 
     def launchSlicelet(self):
       mainFrame = SliceletMainFrame()
