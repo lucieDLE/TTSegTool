@@ -89,6 +89,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
       self.ui.imageFileButton.clicked.connect(self.openFileNamesDialog)
       self.ui.loadCSVPushButton.clicked.connect(self.loadData)
       # Image navigation and master csv updates
+      self.ui.saveMasterFileButton.clicked.connect(self.writeFinalMasterCSV)
       self.ui.imageNavigationScrollBar.setTracking(False)
       self.ui.imageNavigationScrollBar.valueChanged.connect(self.onImageIndexChanged)
       self.ui.findUngradedButton.clicked.connect(self.onFindUngradedClicked)
@@ -855,18 +856,20 @@ class TTSegToolSlicelet(VTKObservationMixin):
             fieldnames = self.image_list[0].keys()
             writer = DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
-            for row in self.image_list:
+            for listrow in self.image_list:
+              row = listrow.copy()
               row['image path'] = row['image path'].relative_to(self.path_to_server)
               row['segmentation path'] = row['segmentation path'].relative_to(self.path_to_server)
               if row['patches path'].exists():
                 row['patches path'] = row['patches path'].relative_to(self.path_to_server)
               else:
                 row['patches path'] = ''
-            writer.writerows(self.image_list)
+              writer.writerow(row)
+            DictWriter.
           from shutil import copyfile
           copyfile(path, self.path_to_image_details)
         except IOError as e:
-          slicer.util.errorDisplay('ERROR Writing out the master csv file.', parent=self.parent)
+          slicer.util.errorDisplay('ERROR Writing out the master csv file.\n {}'.format(e), parent=self.parent)
         except KeyError as e:
           slicer.util.errorDisplay('Error during key parsing for the final write', parent=self.parent)
 
@@ -1044,18 +1047,18 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       """
       Called when the user opens the module the first time and the widget is initialized.
       """
-      self.launchSlicelet()
-      # ScriptedLoadableModuleWidget.setup(self)
+      #self.launchSlicelet()
+      ScriptedLoadableModuleWidget.setup(self)
 
-      # # Show slicelet button
-      # showSliceletButton = qt.QPushButton("Start TT Segmentation Tool")
-      # showSliceletButton.toolTip = "Launch the slicelet"
-      # self.layout.addWidget(qt.QLabel(' '))
-      # self.layout.addWidget(showSliceletButton)
-      # showSliceletButton.connect('clicked()', self.launchSlicelet)
+      # Show slicelet button
+      showSliceletButton = qt.QPushButton("Start TT Segmentation Tool")
+      showSliceletButton.toolTip = "Launch the slicelet"
+      self.layout.addWidget(qt.QLabel(' '))
+      self.layout.addWidget(showSliceletButton)
+      showSliceletButton.connect('clicked()', self.launchSlicelet)
 
-      # # Add vertical spacer
-      # self.layout.addStretch(1)
+      # Add vertical spacer
+      self.layout.addStretch(1)
 
     def launchSlicelet(self):
       mainFrame = SliceletMainFrame()
