@@ -156,7 +156,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
       self.crosshairNode = None
       self.user_name = None
       self.tmp_csv_file_name = None
-      self.patcheditorobserver = None
+      self.patchEditorObserver = None
       self.patcheEditShortcut = None
       self.patchEditModeOn = False
       self.initData()
