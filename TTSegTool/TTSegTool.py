@@ -1,6 +1,4 @@
 import os
-from typing import Dict
-from numpy.core.shape_base import _arrays_for_stack_dispatcher
 import qt
 import unittest
 import logging
@@ -13,21 +11,25 @@ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
 
-  #
-  # TTSegToolSliceletWidget
-  #
-class TTSegToolSliceletWidget:
-    def __init__(self, parent=None):
-      try:
-        parent
-        self.parent = parent
+#   #
+#   # TTSegToolSliceletWidget
+#   #
+# class TTSegToolSliceletWidget:
+#     def __init__(self, parent=None):
+#       try:
+#         parent
+#         self.parent = parent
 
-      except Exception as e:
-        import traceback
-        traceback.print_exc(
-        logging.error("There is no parent to TTSegToolSliceletWidget!"))
+#       except Exception as e:
+#         import traceback
+#         traceback.print_exc(
+#         logging.error("There is no parent to TTSegToolSliceletWidget!"))
 
 class SliceletMainFrame(qt.QDialog):
+    def __init__(self):
+      qt.QDialog.__init__(self)
+      self.slicelet = None
+
     def setSlicelet(self, slicelet):
       self.slicelet = slicelet
 
@@ -97,7 +99,8 @@ class TTSegToolSlicelet(VTKObservationMixin):
       # Patch management
       self.ui.keepPatchPushButton.clicked.connect(self.onSavePatchesButtonClicked)
       self.ui.delPatchPushButton.clicked.connect(self.onDelPatchClicked)
-      self.ui.patchLabelComboBox.addItems(["TT", "Probable TT", "Healthy", "Epilation", "Unknown"])
+      self.ui.patchLabelComboBox.addItems(["TT", "Probable TT", "Healthy", "Epilation", "Probable Epilation", 
+      "Unknown"])
       self.ui.patchLabelComboBox.currentIndexChanged.connect(self.updateFiducialLabel)
       self.ui.imagePatchesTableWidget.currentCellChanged.connect(self.updateFiducialSelection)
       # segmentation management
@@ -507,6 +510,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
           self.addOptionalKey(row, 'n tt')
           self.addOptionalKey(row, 'n probtt')
           self.addOptionalKey(row, 'n epi')
+          self.addOptionalKey(row, 'n probepi')
           self.addOptionalKey(row, 'n healthy')
           self.addOptionalKey(row, 'n none')
         except Exception as e:
@@ -522,6 +526,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
           row['n tt'] = len( [l for l in patch_rows if l['label'] == 'TT'] )
           row['n probtt'] = len( [l for l in patch_rows if l['label'] == 'Probable TT'] )
           row['n epi'] = len( [l for l in patch_rows if l['label'] == 'Epilation'] )
+          row['n probepi'] = len( [l for l in patch_rows if l['label'] == 'Probable Epilation'] )
           row['n healthy'] = len( [l for l in patch_rows if l['label'] == 'Healthy'] )
           row['n healthy'] = len( [l for l in patch_rows if l['label'] == 'Unknown'] )
         self.image_list.append(row)
@@ -929,6 +934,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
       self.image_list[self.current_ind]['n tt'] = len( [row for row in labelColumn if row == 'TT'] )
       self.image_list[self.current_ind]['n probtt'] = len( [row for row in labelColumn if row == 'Probable TT'] )
       self.image_list[self.current_ind]['n epi'] = len( [row for row in labelColumn if row == 'Epilation'] )
+      self.image_list[self.current_ind]['n probepi'] = len( [row for row in labelColumn if row == 'Probable Epilation'] )
       self.image_list[self.current_ind]['n healthy'] = len( [row for row in labelColumn if row == 'Healthy'] )
       self.image_list[self.current_ind]['n healthy'] = len( [row for row in labelColumn if row == 'Unknown'] )
 
@@ -1020,17 +1026,11 @@ class TTSegTool(ScriptedLoadableModule):
       iconsPath = os.path.join(os.path.dirname(__file__), 'Resources/Icons', self.moduleName+'.png')
       parent.icon = qt.QIcon(iconsPath)
 
-      # Additional initialization step after application startup is complete
-      # TODO: remove slicer.app.connect("startupCompleted()", registerSampleData)
-
   #
   # TTSegToolWidget
   #
 
 class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
-    """Uses ScriptedLoadableModuleWidget base class, available at:
-    https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
-    """
 
     def __init__(self, parent=None):
       """
@@ -1075,7 +1075,6 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
       # Make the slicelet reachable from the Slicer python interactor for testing
       slicer.ttSegToolInstance = slicelet
-
       return slicelet
 
     def onSliceletClosed(self):
@@ -1173,4 +1172,4 @@ if __name__ == "__main__":
     mainFrame.windowIcon = qt.QIcon(iconPath)
     # mainFrame = qt.QFrame()
     slicelet = TTSegToolSlicelet(mainFrame, resourcePath=os.path.join(os.path.dirname(__file__), 'Resources/UI/TTSegTool.ui'))
-
+    mainFrame.setSlicelet(slicelet)
