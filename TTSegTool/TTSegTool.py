@@ -71,7 +71,8 @@ class TTSegToolSlicelet(VTKObservationMixin):
       self.onViewSelect(7)
       
       # setup self connections
-      self.setupLayoutConnections()
+      self.crosshairNode=slicer.util.getNode('Crosshair')
+      #self.setupLayoutConnections()
       self.parent.show()
 
     #------------------------------------------------------------------------------
@@ -107,15 +108,15 @@ class TTSegToolSlicelet(VTKObservationMixin):
       self.ui.showSegmentationCheckBox.stateChanged.connect(self.changeSegmentationVisibility)
 
     #------------------------------------------------------------------------------
-    def setupLayoutConnections(self):
+    def setupLayoutConnections(self, add=True):
       if self.layoutWidget is None:
         logging.warning('Layout widget is not set')
       
       lm = self.layoutWidget.layoutManager()
       sw = lm.sliceWidget('Red')
       self.interactor = sw.interactorStyle().GetInteractor()
-      self.interactor.AddObserver(vtk.vtkCommand.LeftButtonPressEvent, self.OnClick)
-      self.crosshairNode=slicer.util.getNode('Crosshair')
+      if add:
+        self.interactor.AddObserver(vtk.vtkCommand.LeftButtonPressEvent, self.OnClick)
 
   ##### Data cleanup/initialization ############
     #------------------------------------------------------------------------------
