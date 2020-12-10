@@ -72,7 +72,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
       
       # setup self connections
       self.crosshairNode=slicer.util.getNode('Crosshair')
-      self.setupLayoutConnections()
+      # self.setupLayoutConnections()
       self.parent.show()
 
     #------------------------------------------------------------------------------
@@ -787,6 +787,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
           utility.MRMLUtility.removeMRMLNode(self.image_node)
         #utility.MRMLUtility.loadMRMLNode('image_node', self.path_to_server, self.image_list[self.current_ind] + '.jpg', 'VolumeFile') 
         self.image_node = slicer.util.loadVolume(str(imgpath), {'singleFile':True})
+        slicer.util.resetSliceViews()
       except Exception as e:
         slicer.util.errorDisplay("Couldn't load imagepath: {}\n ERROR: {}".format(imgpath, e), parent=self.parent)
 
