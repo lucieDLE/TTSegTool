@@ -69,7 +69,9 @@ class TTSegToolSlicelet(VTKObservationMixin):
       self.layoutWidget.setMRMLScene(slicer.mrmlScene)
       self.parent.layout().addWidget(self.layoutWidget,2)
       self.onViewSelect(7)
-      
+      self.patcheEditShortcut = qt.QShortcut(qt.QKeySequence('p'), self.parent)
+      self.patcheEditShortcut.connect('activated()', self.switchPatchEditMode)
+
       # setup self connections
       self.crosshairNode=slicer.util.getNode('Crosshair')
       # self.setupLayoutConnections()
@@ -102,10 +104,32 @@ class TTSegToolSlicelet(VTKObservationMixin):
       self.ui.delPatchPushButton.clicked.connect(self.onDelPatchClicked)
       self.ui.patchLabelComboBox.addItems(["TT", "Probable TT", "Healthy", "Epilation", "Probable Epilation", 
       "Unknown"])
+      self.ui.startPatchEditModeButton.clicked.connect(self.switchPatchEditMode)
       self.ui.patchLabelComboBox.currentIndexChanged.connect(self.updateFiducialLabel)
       self.ui.imagePatchesTableWidget.currentCellChanged.connect(self.updateFiducialSelection)
       # segmentation management
       self.ui.showSegmentationCheckBox.stateChanged.connect(self.changeSegmentationVisibility)
+
+    #------------------------------------------------------------------------------
+    def setupPatchEditMode(self):
+      if self.ui is None:
+        return
+      
+      self.setupLayoutConnections(self.patchEditModeOn)
+      self.ui.startPatchEditModeButton.setChecked(self.patchEditModeOn)
+      if self.patchEditModeOn:
+        self.ui.startPatchEditModeButton.setStyleSheet("QPushButton {background-color: rgb(214, 0, 0)}")
+        self.ui.startPatchEditModeButton.setText("   STOP PATCH EDIT MODE   ")
+        
+      else:
+        self.ui.startPatchEditModeButton.setStyleSheet("QPushButton {background-color: rgb(85, 170, 0)}")
+        self.ui.startPatchEditModeButton.setText("   START PATCH EDIT MODE   ")
+
+    
+    #------------------------------------------------------------------------------
+    def switchPatchEditMode(self):
+      self.patchEditModeOn = not self.patchEditModeOn
+      self.setupPatchEditMode()
 
     #------------------------------------------------------------------------------
     def setupLayoutConnections(self, add=True):
@@ -116,7 +140,9 @@ class TTSegToolSlicelet(VTKObservationMixin):
       sw = lm.sliceWidget('Red')
       self.interactor = sw.interactorStyle().GetInteractor()
       if add:
-        self.interactor.AddObserver(vtk.vtkCommand.LeftButtonPressEvent, self.OnClick)
+        self.patchEditorObserver = self.interactor.AddObserver(vtk.vtkCommand.LeftButtonPressEvent, self.OnClick)
+      elif self.patchEditorObserver is not None:
+        self.interactor.RemoveObserver(self.patchEditorObserver)
 
   ##### Data cleanup/initialization ############
     #------------------------------------------------------------------------------
@@ -130,6 +156,9 @@ class TTSegToolSlicelet(VTKObservationMixin):
       self.crosshairNode = None
       self.user_name = None
       self.tmp_csv_file_name = None
+      self.patcheditorobserver = None
+      self.patcheEditShortcut = None
+      self.patchEditModeOn = False
       self.initData()
       self.updateUI()
 
@@ -636,6 +665,9 @@ class TTSegToolSlicelet(VTKObservationMixin):
         return
 
       self.updateNavigationUI()
+      self.patchEditModeOn = False
+      self.setupPatchEditMode()
+
       if self.current_ind >=0 and len(self.image_list) > 0:
         self.showImageAtCurrentInd()
         self.loadCurrentSegmentation()
