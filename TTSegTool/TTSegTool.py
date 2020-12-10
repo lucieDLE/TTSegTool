@@ -72,7 +72,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
       
       # setup self connections
       self.crosshairNode=slicer.util.getNode('Crosshair')
-      #self.setupLayoutConnections()
+      self.setupLayoutConnections()
       self.parent.show()
 
     #------------------------------------------------------------------------------
@@ -245,6 +245,18 @@ class TTSegToolSlicelet(VTKObservationMixin):
       # Check the IJK and RAS is non-empty
       if ijk is None:
         return None
+      # Make sure the coordinates are inside the frame
+      if self.image_node is None:
+        return
+      
+      imageData = self.image_node.GetImageData()
+      if not imageData:
+        return
+      dims =  imageData.GetDimensions()
+      for dim in range(len(ijk)):
+        if ijk[dim] < 0 or ijk[dim] >= dims[dim]:
+          logging.debug('Clicked out of frame, returning')
+          return
 
       row_id = self.ui.imagePatchesTableWidget.rowCount
       self.ui.imagePatchesTableWidget.insertRow(row_id)
