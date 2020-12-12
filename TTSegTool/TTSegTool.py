@@ -81,6 +81,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       slicer.mrmlScene.Clear()
     
     def setup(self):
+      print('In setup')
       ScriptedLoadableModuleWidget.setup(self)
       
       # self.parent = parent
@@ -111,6 +112,9 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       
       self.patcheEditShortcut = qt.QShortcut(qt.QKeySequence('p'), self.parent)
       self.patcheEditShortcut.connect('activated()', self.switchPatchEditMode)
+    
+      self.segmentEditShortcut = qt.QShortcut(qt.QKeySequence('s'), self.parent)
+      self.segmentEditShortcut.connect('activated()', self.switchSegmentEditMode)
     
       self.isSingleModuleShown = False
       slicer.util.mainWindow().setWindowTitle("TT Segmentation Tool")
@@ -200,7 +204,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def setupPatchEditMode(self):
       if self.ui is None:
         return
-      
+
       self.setupLayoutConnections(self.patchEditModeOn)
       self.ui.startPatchEditModeButton.setChecked(self.patchEditModeOn)
       if self.patchEditModeOn:
@@ -213,9 +217,34 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     #------------------------------------------------------------------------------
     def switchPatchEditMode(self):
-      print('Switching patch edit mode')
+      if not self.patchEditModeOn and self.segmentEditModeOn:
+        # first switch off the segmentation mode
+        self.switchSegmentEditMode()
+
       self.patchEditModeOn = not self.patchEditModeOn
       self.setupPatchEditMode()
+    
+    #------------------------------------------------------------------------------
+    def setupSegmentEditMode(self):
+      if self.ui is None:
+        return
+
+      self.ui.startSegmentEditModeButton.setChecked(self.segmentEditModeOn)
+      if self.segmentEditModeOn:
+        self.ui.startSegmentEditModeButton.setStyleSheet("QPushButton {background-color: rgb(214, 0, 0)}")
+        self.ui.startSegmentEditModeButton.setText("   STOP SEGMENTATION EDIT MODE   ")
+      else:
+        self.ui.startSegmentEditModeButton.setStyleSheet("QPushButton {background-color: rgb(85, 170, 0)}")
+        self.ui.startSegmentEditModeButton.setText("   START SEGMENTATION EDIT MODE   ")
+
+    #------------------------------------------------------------------------------
+    def switchSegmentEditMode(self):
+      if not self.segmentEditModeOn and self.patchEditModeOn:
+        # before switching first disable patch edit mode if it is on
+        self.switchPatchEditMode()
+
+      self.segmentEditModeOn = not self.segmentEditModeOn
+      self.setupSegmentEditMode()
 
     #------------------------------------------------------------------------------
     def setupLayoutConnections(self, add=True):
@@ -245,6 +274,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.patchEditorObserver = None
       self.patcheEditShortcut = None
       self.patchEditModeOn = False
+      self.segmentEditModeOn = False
       self.initData()
       self.updateUI()
 
@@ -731,8 +761,11 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         return
 
       self.updateNavigationUI()
-      self.patchEditModeOn = False
-      self.setupPatchEditMode()
+      if self.patchEditModeOn:
+        self.switchPatchEditMode()
+      
+      if self.segmentEditModeOn():
+        self.switchSegmentEditMode()
 
       if self.current_ind >=0 and len(self.image_list) > 0:
         self.showImageAtCurrentInd()

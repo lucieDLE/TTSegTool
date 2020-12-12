@@ -304,34 +304,20 @@
        </widget>
       </item>
       <item>
-       <widget class="QScrollArea" name="scrollArea">
-        <property name="horizontalScrollBarPolicy">
-         <enum>Qt::ScrollBarAlwaysOff</enum>
+       <widget class="QPushButton" name="startSegmentEditModeButton">
+        <property name="styleSheet">
+         <string notr="true">QPushButton {background-color: rgb(85, 170, 0)}</string>
         </property>
-        <property name="widgetResizable">
+        <property name="text">
+         <string>START SEGMENTATION EDIT MODE</string>
+        </property>
+        <property name="checkable">
          <bool>true</bool>
         </property>
-        <widget class="QWidget" name="scrollAreaWidgetContents">
-         <property name="geometry">
-          <rect>
-           <x>0</x>
-           <y>0</y>
-           <width>498</width>
-           <height>90</height>
-          </rect>
-         </property>
-         <widget class="qMRMLSegmentEditorWidget" name="SegmentEditorWidget">
-          <property name="geometry">
-           <rect>
-            <x>0</x>
-            <y>0</y>
-            <width>471</width>
-            <height>416</height>
-           </rect>
-          </property>
-         </widget>
-        </widget>
        </widget>
+      </item>
+      <item>
+       <widget class="qMRMLSegmentEditorWidget" name="SegmentEditorWidget"/>
       </item>
      </layout>
     </widget>
@@ -360,7 +346,6 @@
    <class>qMRMLSegmentEditorWidget</class>
    <extends>qMRMLWidget</extends>
    <header>qMRMLSegmentEditorWidget.h</header>
-   <container>1</container>
   </customwidget>
  </customwidgets>
  <tabstops>
@@ -378,8 +363,6 @@
   <tabstop>delPatchPushButton</tabstop>
   <tabstop>keepPatchPushButton</tabstop>
   <tabstop>segmentEditorCollapsibleButton</tabstop>
-  <tabstop>showSegmentationCheckBox</tabstop>
-  <tabstop>scrollArea</tabstop>
   <tabstop>imageNavigationScrollBar</tabstop>
  </tabstops>
  <resources/>
