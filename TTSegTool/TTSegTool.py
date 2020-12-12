@@ -11,20 +11,6 @@ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
 
-#   #
-#   # TTSegToolSliceletWidget
-#   #
-# class TTSegToolSliceletWidget:
-#     def __init__(self, parent=None):
-#       try:
-#         parent
-#         self.parent = parent
-
-#       except Exception as e:
-#         import traceback
-#         traceback.print_exc(
-#         logging.error("There is no parent to TTSegToolSliceletWidget!"))
-
 class SliceletMainFrame(qt.QDialog):
     def __init__(self):
       qt.QDialog.__init__(self)
@@ -37,15 +23,70 @@ class SliceletMainFrame(qt.QDialog):
       self.slicelet.disconnect()
       self.slicelet = None
 
-class TTSegToolSlicelet(VTKObservationMixin):
-    def __init__(self, parent, developerMode=False, resourcePath=None):
+# class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
+
+#     def __init__(self, parent=None):
+#       """
+#       Called when the user opens the module the first time and the widget is initialized.
+#       """
+#       ScriptedLoadableModuleWidget.__init__(self, parent)
+#       VTKObservationMixin.__init__(self)  # needed for parameter node observation
+#       #
+#       # self._parameterNode = None
+#       # self._updatingGUIFromParameterNode = False
+
+#     def setup(self):
+#       """
+#       Called when the user opens the module the first time and the widget is initialized.
+#       """
+#       ScriptedLoadableModuleWidget.setup(self)
+
+#       if not self.developerMode:
+#         self.launchSlicelet()
+#       else:
+#         # Show slicelet button
+#         showSliceletButton = qt.QPushButton("Start TT Segmentation Tool")
+#         showSliceletButton.toolTip = "Launch the slicelet"
+#         self.layout.addWidget(qt.QLabel(' '))
+#         self.layout.addWidget(showSliceletButton)
+#         showSliceletButton.connect('clicked()', self.launchSlicelet)
+
+#         # Add vertical spacer
+#         self.layout.addStretch(1)
+
+#     def launchSlicelet(self):
+#       mainFrame = SliceletMainFrame()
+#       mainFrame.minimumWidth = 1200
+#       mainFrame.minimumHeight = 720
+#       mainFrame.windowTitle = "TT Segmentation tool"
+#       mainFrame.setWindowFlags(qt.Qt.WindowCloseButtonHint | qt.Qt.WindowMaximizeButtonHint | qt.Qt.WindowTitleHint)
+#       iconPath = os.path.join(os.path.dirname(__file__), 'Resources/Icons', self.moduleName+'.png')
+#       mainFrame.windowIcon = qt.QIcon(iconPath)
+#       mainFrame.connect('destroyed()', self.onSliceletClosed)
+#       slicelet = TTSegToolSlicelet(mainFrame, self.developerMode, resourcePath=os.path.join(os.path.dirname(__file__), 'Resources/UI', self.moduleName+'.ui'))
+#       mainFrame.setSlicelet(slicelet)
+
+#       # Make the slicelet reachable from the Slicer python interactor for testing
+#       slicer.ttSegToolInstance = slicelet
+#       return slicelet
+
+#     def onSliceletClosed(self):
+#       logging.debug('Slicelet closed')
+
+
+class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
+    def __init__(self, parent=None):
+      ScriptedLoadableModuleWidget.__init__(self, parent)
       VTKObservationMixin.__init__(self)
       slicer.mrmlScene.Clear()
-      self.logic = None
-      self.parent = parent
-      self.parent.showMaximized()
-      self.parent.setLayout(qt.QHBoxLayout())
-      self.layout = self.parent.layout()
+    
+    def setup(self):
+      ScriptedLoadableModuleWidget.setup(self)
+      
+      # self.parent = parent
+      # self.parent.showMaximized()
+      # self.parent.setLayout(qt.QHBoxLayout())
+      # self.layout = self.parent.layout()
       self.layout.setMargin(0)
       self.layout.setSpacing(0)
 
@@ -54,6 +95,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
       self.sliceletPanelLayout.setMargin(4)
       self.sliceletPanelLayout.setSpacing(0)
       self.layout.addWidget(self.sliceletPanel,0)
+      resourcePath=os.path.join(os.path.dirname(__file__), 'Resources/UI', self.moduleName+'.ui')
 
       self.ui = None
       self.setDefaultParamaters()
@@ -65,27 +107,71 @@ class TTSegToolSlicelet(VTKObservationMixin):
         self.ui = slicer.util.childWidgetVariables(uiWidget)
         self.setupConnections()
 
-      self.layoutWidget = slicer.qMRMLLayoutWidget() 
-      self.layoutWidget.setMRMLScene(slicer.mrmlScene)
-      self.parent.layout().addWidget(self.layoutWidget,2)
-      self.onViewSelect(7)
+      slicer.app.layoutManager().setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutOneUpRedSliceView)
+      
       self.patcheEditShortcut = qt.QShortcut(qt.QKeySequence('p'), self.parent)
       self.patcheEditShortcut.connect('activated()', self.switchPatchEditMode)
+    
+      self.isSingleModuleShown = False
+      slicer.util.mainWindow().setWindowTitle("TT Segmentation Tool")
+      self.showSingleModule(True)
+      shortcut = qt.QShortcut(slicer.util.mainWindow())
+      shortcut.setKey(qt.QKeySequence("Ctrl+Shift+b"))
+      shortcut.connect('activated()', lambda: self.showSingleModule(toggle=True))
+
+      iconPath = os.path.join(os.path.dirname(__file__), 'Resources/Icons', self.moduleName+'.png')
+
 
       # setup self connections
       self.crosshairNode=slicer.util.getNode('Crosshair')
-      # self.setupLayoutConnections()
-      self.parent.show()
+      # self.parent.show()
+    
+    def exit(self):
+      self.disconnect()
+
+    #----------------------------------------------------------------------------------------
+    def showSingleModule(self, singleModule=True, toggle=False):
+      if toggle:
+        singleModule = not self.isSingleModuleShown
+
+      self.isSingleModuleShown = singleModule
+
+      if singleModule:
+        # We hide all toolbars, etc. which is inconvenient as a default startup setting,
+        # therefore disable saving of window setup.
+        import qt
+        settings = qt.QSettings()
+        settings.setValue('MainWindow/RestoreGeometry', 'false')
+
+      keepToolbars = [
+        #slicer.util.findChild(slicer.util.mainWindow(), 'MainToolBar'),
+        # slicer.util.findChild(slicer.util.mainWindow(), 'ViewToolBar'),
+        # slicer.util.findChild(slicer.util.mainWindow(), 'ViewersToolBar')
+         ]
+      slicer.util.setToolbarsVisible(not singleModule, keepToolbars)
+      slicer.util.setMenuBarsVisible(not singleModule)
+      slicer.util.setApplicationLogoVisible(not singleModule)
+      slicer.util.setModuleHelpSectionVisible(not singleModule)
+      slicer.util.setModulePanelTitleVisible(not singleModule)
+      slicer.util.setDataProbeVisible(not singleModule)
+      # slicer.util.setViewControllersVisible(not singleModule)
+
+      if singleModule:
+        slicer.util.setPythonConsoleVisible(self.developerMode)
+
 
     #------------------------------------------------------------------------------
     def disconnect(self):
-      self.updateMasterDictAndTable()
-      self.saveCurrentImagePatchInfo()
-      self.saveCurrentRowToMaster()
-      self.writeFinalMasterCSV()
-      self.initData()
-      self.updateUI()
-      logging.info('Disconnecting something')
+      if self.image_list is not None and len(self.image_list) > 0 and self.current_ind in range(len(self.image_list)):
+        self.updateMasterDictAndTable()
+        self.saveCurrentImagePatchInfo()
+        self.saveCurrentRowToMaster()
+        self.writeFinalMasterCSV()
+        slicer.util.infoDisplay("Saved the current state for TT Segmentation tool len(self.image_list): {}".format(len(self.image)))
+        self.initData()
+        self.updateUI()
+        
+      logging.info('Disconnecting TT segmentation tool')
 
   #### CONNECTIONS #####
     #------------------------------------------------------------------------------
@@ -125,18 +211,18 @@ class TTSegToolSlicelet(VTKObservationMixin):
         self.ui.startPatchEditModeButton.setStyleSheet("QPushButton {background-color: rgb(85, 170, 0)}")
         self.ui.startPatchEditModeButton.setText("   START PATCH EDIT MODE   ")
 
-    
     #------------------------------------------------------------------------------
     def switchPatchEditMode(self):
+      print('Switching patch edit mode')
       self.patchEditModeOn = not self.patchEditModeOn
       self.setupPatchEditMode()
 
     #------------------------------------------------------------------------------
     def setupLayoutConnections(self, add=True):
-      if self.layoutWidget is None:
+      if slicer.app.layoutManager() is None:
         logging.warning('Layout widget is not set')
       
-      lm = self.layoutWidget.layoutManager()
+      lm = slicer.app.layoutManager()
       sw = lm.sliceWidget('Red')
       self.interactor = sw.interactorStyle().GetInteractor()
       if add:
@@ -401,7 +487,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
         sliceNode = self.crosshairNode.GetCursorPositionXYZ(xyz)
         self.crosshairNode.GetCursorPositionRAS(ras)
         if sliceNode is not None and sliceNode.GetName() == 'Red':
-          lm = self.layoutWidget.layoutManager()
+          lm =slicer.app.layoutManager()
           sliceLogic = lm.sliceWidget('Red').sliceLogic()
           if sliceLogic is None:
             logging.debug('Empyt slice logic')
@@ -447,16 +533,16 @@ class TTSegToolSlicelet(VTKObservationMixin):
     def loadData(self):
       # read the excl sheet, and convert to dict
       if len(self.ui.usernameLineEdit.text) == 0:
-        slicer.util.errorDisplay("Pleae provide a username", parent=self.parent)
+        slicer.util.errorDisplay("Pleae provide a username")
         return
       if self.path_to_image_details is None:
-        slicer.util.errorDisplay('Please provide a valid Master CSV File', parent=self.parent)
+        slicer.util.errorDisplay('Please provide a valid Master CSV File')
         return
       if self.path_to_server is None:
-        slicer.util.errorDisplay('Please provide a valid server path ', parent=self.parent)
+        slicer.util.errorDisplay('Please provide a valid server path ')
         return
       if not self.checkMasterFileForRequiredFields():
-        slicer.util.errorDisplay('Did not find the fields that are at least required', parent=self.parent)
+        slicer.util.errorDisplay('Did not find the fields that are at least required')
 
       logging.info('Found the required fields in the master file! Loading')
       try:
@@ -469,14 +555,14 @@ class TTSegToolSlicelet(VTKObservationMixin):
           raise IOError('Error reading the Master CSV File')
         self.createMasterDict(image_list)
       except Exception as e:
-        slicer.util.errorDisplay("Error processing input csv \n ERROR:  {}".format(e), parent=self.parent)
+        slicer.util.errorDisplay("Error processing input csv \n ERROR:  {}".format(e))
         self.ui.imageFileButton.setText("Not Selected")
-      slicer.util.infoDisplay("Found a list of {} images".format(len(self.image_list)), parent=self.parent)
+      slicer.util.infoDisplay("Found a list of {} images".format(len(self.image_list)))
       if len(self.image_list) > 0:
         self.startProcessingFiles()
         self.ui.inputsCollapsibleButton.collapsed = True
         self.fillMasterTable()
-      self.parent.show()
+      # self.parent.show()
 
   #---------------------------------------------------------
     def checkMasterFileForRequiredFields(self):
@@ -620,26 +706,6 @@ class TTSegToolSlicelet(VTKObservationMixin):
             self.ui.imageDetailsTable.setItem(row_id, ind, item)
       self.ui.imageDetailsTable.resizeColumnsToContents()
 
-  #------------------------------------------------------------------------------
-  #------------------------------------------------------------------------------
-    def onViewSelect(self, layoutIndex):
-      if layoutIndex == 0:
-        self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpView)
-      elif layoutIndex == 1:
-        self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutConventionalView)
-      elif layoutIndex == 2:
-        self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutOneUp3DView)
-      elif layoutIndex == 3:
-        self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutTabbedSliceView)
-      elif layoutIndex == 4:
-        self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutDual3DView)
-      elif layoutIndex == 5:
-        self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpPlotView)
-      elif layoutIndex == 6:
-        self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutOneUpPlotView)
-      elif layoutIndex == 7:
-        self.layoutWidget.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutOneUpRedSliceView)
-
     #------------------------------------------------------------------------------
     #------------------------------------------------------------------------------
     def changeCurrentImageInd(self, new_ind):
@@ -740,7 +806,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
             break
           else:
             if ind == len(self.image_list)-1:
-              slicer.util.infoDisplay("Reached the last image, All graded!!", parent=self.parent)
+              slicer.util.infoDisplay("Reached the last image, All graded!!")
               first_ind = ind
       return first_ind
 
@@ -763,14 +829,14 @@ class TTSegToolSlicelet(VTKObservationMixin):
           # Find the first index of the graded.
           self.changeCurrentImageInd(0)
         else:
-          slicer.util.errorDisplay("Couldn't find images from the list in directory: {}".format(self.path_to_image_details), parent=self.parent)
+          slicer.util.errorDisplay("Couldn't find images from the list in directory: {}".format(self.path_to_image_details))
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------  
     def loadCurrentSegmentation(self):
       logging.debug('in loadCurrentSegmentation')
       if len(self.image_list) == 0 or self.path_to_image_details is None: 
-        slicer.util.errorDisplay('Show image at current IND: Need to chose an image list and path to the images - make sure those are in', parent=self.parent)
+        slicer.util.errorDisplay('Show image at current IND: Need to chose an image list and path to the images - make sure those are in')
         return
       if self.current_ind < 0 not in range(len(self.image_list)):
         slicer.util.warningDisplay("Wrong image index: {}".format(self.current_ind))
@@ -801,14 +867,14 @@ class TTSegToolSlicelet(VTKObservationMixin):
             self.ui.SegmentEditorWidget.setEnabled(visibility)
 
       except Exception as e:
-        slicer.util.errorDisplay("Couldn't load imagepath: {}\n ERROR: {}".format(imgpath, e), parent=self.parent)
+        slicer.util.errorDisplay("Couldn't load imagepath: {}\n ERROR: {}".format(imgpath, e))
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------  
     def showImageAtCurrentInd(self):
       logging.info('In showImageAtCurrentInd')
       if len(self.image_list) == 0 or self.path_to_image_details is None:
-        slicer.util.errorDisplay('Show image at current IND: Need to chose an image list - make sure those are in', parent=self.parent)
+        slicer.util.errorDisplay('Show image at current IND: Need to chose an image list - make sure those are in')
         return
       if self.current_ind not in range(len(self.image_list)):
         slicer.util.warningDisplay("Wrong image index: {}".format(self.current_ind))
@@ -821,7 +887,7 @@ class TTSegToolSlicelet(VTKObservationMixin):
         self.image_node = slicer.util.loadVolume(str(imgpath), {'singleFile':True})
         slicer.util.resetSliceViews()
       except Exception as e:
-        slicer.util.errorDisplay("Couldn't load imagepath: {}\n ERROR: {}".format(imgpath, e), parent=self.parent)
+        slicer.util.errorDisplay("Couldn't load imagepath: {}\n ERROR: {}".format(imgpath, e))
 
     #------------------------------------------------------------------------------
     def readCSV(self, file_path):
@@ -918,10 +984,13 @@ class TTSegToolSlicelet(VTKObservationMixin):
               writer.writerow(row)
           from shutil import copyfile
           copyfile(path, self.path_to_image_details)
+          slicer.util.infoDisplay('Wrote successfully output csv files')
         except IOError as e:
-          slicer.util.errorDisplay('ERROR Writing out the master csv file.\n {}'.format(e), parent=self.parent)
+          logging.error('ERROR Writing out the master csv file.\n {}'.format(e))
+          slicer.util.errorDisplay('ERROR Writing out the master csv file.\n {}'.format(e))
         except KeyError as e:
-          slicer.util.errorDisplay('Error during key parsing for the final write', parent=self.parent)
+          logging.error('ERROR durign key parsing.\n {}'.format(e))
+          slicer.util.errorDisplay('Error during key parsing for the final write')
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------  
@@ -1076,55 +1145,55 @@ class TTSegTool(ScriptedLoadableModule):
   # TTSegToolWidget
   #
 
-class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
+# class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
-    def __init__(self, parent=None):
-      """
-      Called when the user opens the module the first time and the widget is initialized.
-      """
-      ScriptedLoadableModuleWidget.__init__(self, parent)
-      VTKObservationMixin.__init__(self)  # needed for parameter node observation
-      #
-      # self._parameterNode = None
-      # self._updatingGUIFromParameterNode = False
+#     def __init__(self, parent=None):
+#       """
+#       Called when the user opens the module the first time and the widget is initialized.
+#       """
+#       ScriptedLoadableModuleWidget.__init__(self, parent)
+#       VTKObservationMixin.__init__(self)  # needed for parameter node observation
+#       #
+#       # self._parameterNode = None
+#       # self._updatingGUIFromParameterNode = False
 
-    def setup(self):
-      """
-      Called when the user opens the module the first time and the widget is initialized.
-      """
-      ScriptedLoadableModuleWidget.setup(self)
+#     def setup(self):
+#       """
+#       Called when the user opens the module the first time and the widget is initialized.
+#       """
+#       ScriptedLoadableModuleWidget.setup(self)
 
-      if not self.developerMode:
-        self.launchSlicelet()
-      else:
-        # Show slicelet button
-        showSliceletButton = qt.QPushButton("Start TT Segmentation Tool")
-        showSliceletButton.toolTip = "Launch the slicelet"
-        self.layout.addWidget(qt.QLabel(' '))
-        self.layout.addWidget(showSliceletButton)
-        showSliceletButton.connect('clicked()', self.launchSlicelet)
+#       if not self.developerMode:
+#         self.launchSlicelet()
+#       else:
+#         # Show slicelet button
+#         showSliceletButton = qt.QPushButton("Start TT Segmentation Tool")
+#         showSliceletButton.toolTip = "Launch the slicelet"
+#         self.layout.addWidget(qt.QLabel(' '))
+#         self.layout.addWidget(showSliceletButton)
+#         showSliceletButton.connect('clicked()', self.launchSlicelet)
 
-        # Add vertical spacer
-        self.layout.addStretch(1)
+#         # Add vertical spacer
+#         self.layout.addStretch(1)
 
-    def launchSlicelet(self):
-      mainFrame = SliceletMainFrame()
-      mainFrame.minimumWidth = 1200
-      mainFrame.minimumHeight = 720
-      mainFrame.windowTitle = "TT Segmentation tool"
-      mainFrame.setWindowFlags(qt.Qt.WindowCloseButtonHint | qt.Qt.WindowMaximizeButtonHint | qt.Qt.WindowTitleHint)
-      iconPath = os.path.join(os.path.dirname(__file__), 'Resources/Icons', self.moduleName+'.png')
-      mainFrame.windowIcon = qt.QIcon(iconPath)
-      mainFrame.connect('destroyed()', self.onSliceletClosed)
-      slicelet = TTSegToolSlicelet(mainFrame, self.developerMode, resourcePath=os.path.join(os.path.dirname(__file__), 'Resources/UI', self.moduleName+'.ui'))
-      mainFrame.setSlicelet(slicelet)
+#     def launchSlicelet(self):
+#       mainFrame = SliceletMainFrame()
+#       mainFrame.minimumWidth = 1200
+#       mainFrame.minimumHeight = 720
+#       mainFrame.windowTitle = "TT Segmentation tool"
+#       mainFrame.setWindowFlags(qt.Qt.WindowCloseButtonHint | qt.Qt.WindowMaximizeButtonHint | qt.Qt.WindowTitleHint)
+#       iconPath = os.path.join(os.path.dirname(__file__), 'Resources/Icons', self.moduleName+'.png')
+#       mainFrame.windowIcon = qt.QIcon(iconPath)
+#       mainFrame.connect('destroyed()', self.onSliceletClosed)
+#       slicelet = TTSegToolSlicelet(mainFrame, self.developerMode, resourcePath=os.path.join(os.path.dirname(__file__), 'Resources/UI', self.moduleName+'.ui'))
+#       mainFrame.setSlicelet(slicelet)
 
-      # Make the slicelet reachable from the Slicer python interactor for testing
-      slicer.ttSegToolInstance = slicelet
-      return slicelet
+#       # Make the slicelet reachable from the Slicer python interactor for testing
+#       slicer.ttSegToolInstance = slicelet
+#       return slicelet
 
-    def onSliceletClosed(self):
-      logging.debug('Slicelet closed')
+#     def onSliceletClosed(self):
+#       logging.debug('Slicelet closed')
 
 
   #
