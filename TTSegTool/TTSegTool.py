@@ -30,74 +30,11 @@ class TTSegToolFileDialog():
     # Implement custom scene save operation here.
     # Return True if saving completed successfully,
     # return False if saving was cancelled.
-    writeStatus = slicer.modules.TTSegToolWidget.writeFinalMasterCSV()
+    writeStatus = slicer.modules.TTSegToolWidget.saveCurrentState(writeToMaster=True)
     if writeStatus:
       slicer.util.infoDisplay('Wrote the TT master CSV successfully')
     print('WriteStatus is: {}'.format(writeStatus))
     return writeStatus
-
-# class SliceletMainFrame(qt.QDialog):
-#     def __init__(self):
-#       qt.QDialog.__init__(self)
-#       self.slicelet = None
-
-#     def setSlicelet(self, slicelet):
-#       self.slicelet = slicelet
-
-#     def hideEvent(self, event):
-#       self.slicelet.disconnect()
-#       self.slicelet = None
-
-# class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
-
-#     def __init__(self, parent=None):
-#       """
-#       Called when the user opens the module the first time and the widget is initialized.
-#       """
-#       ScriptedLoadableModuleWidget.__init__(self, parent)
-#       VTKObservationMixin.__init__(self)  # needed for parameter node observation
-#       #
-#       # self._parameterNode = None
-#       # self._updatingGUIFromParameterNode = False
-
-#     def setup(self):
-#       """
-#       Called when the user opens the module the first time and the widget is initialized.
-#       """
-#       ScriptedLoadableModuleWidget.setup(self)
-
-#       if not self.developerMode:
-#         self.launchSlicelet()
-#       else:
-#         # Show slicelet button
-#         showSliceletButton = qt.QPushButton("Start TT Segmentation Tool")
-#         showSliceletButton.toolTip = "Launch the slicelet"
-#         self.layout.addWidget(qt.QLabel(' '))
-#         self.layout.addWidget(showSliceletButton)
-#         showSliceletButton.connect('clicked()', self.launchSlicelet)
-
-#         # Add vertical spacer
-#         self.layout.addStretch(1)
-
-#     def launchSlicelet(self):
-#       mainFrame = SliceletMainFrame()
-#       mainFrame.minimumWidth = 1200
-#       mainFrame.minimumHeight = 720
-#       mainFrame.windowTitle = "TT Segmentation tool"
-#       mainFrame.setWindowFlags(qt.Qt.WindowCloseButtonHint | qt.Qt.WindowMaximizeButtonHint | qt.Qt.WindowTitleHint)
-#       iconPath = os.path.join(os.path.dirname(__file__), 'Resources/Icons', self.moduleName+'.png')
-#       mainFrame.windowIcon = qt.QIcon(iconPath)
-#       mainFrame.connect('destroyed()', self.onSliceletClosed)
-#       slicelet = TTSegToolSlicelet(mainFrame, self.developerMode, resourcePath=os.path.join(os.path.dirname(__file__), 'Resources/UI', self.moduleName+'.ui'))
-#       mainFrame.setSlicelet(slicelet)
-
-#       # Make the slicelet reachable from the Slicer python interactor for testing
-#       slicer.ttSegToolInstance = slicelet
-#       return slicelet
-
-#     def onSliceletClosed(self):
-#       logging.debug('Slicelet closed')
-
 
 class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def __init__(self, parent=None):
@@ -106,9 +43,8 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       slicer.mrmlScene.Clear()
     
     def setup(self):
-      print('In setup')
       ScriptedLoadableModuleWidget.setup(self)
-      
+      slicer.util.mainWindow().showMaximized()
       # self.parent = parent
       # self.parent.showMaximized()
       # self.parent.setLayout(qt.QHBoxLayout())
@@ -188,18 +124,26 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       slicer.util.setModuleHelpSectionVisible(not singleModule)
       slicer.util.setModulePanelTitleVisible(not singleModule)
       slicer.util.setDataProbeVisible(not singleModule)
-      # slicer.util.setViewControllersVisible(not singleModule)
 
       if singleModule:
         slicer.util.setPythonConsoleVisible(self.developerMode)
 
-    #------------------------------------------------------------------------------
-    def disconnect(self):
+    def saveCurrentState(self, writeToMaster = False):
+      writeStatus = True
       if self.image_list is not None and len(self.image_list) > 0 and self.current_ind in range(len(self.image_list)):
         self.updateMasterDictAndTable()
         self.saveCurrentImagePatchInfo()
+        self.saveCurrentSegmentation()
         self.saveCurrentRowToMaster()
-        self.writeFinalMasterCSV()
+        if writeToMaster:
+            # Need this for final save out. This might be cheesy, and probably shoudl be done for all above
+            writeStatus = writeStatus & self.writeFinalMasterCSV()
+        return writeStatus
+
+    #------------------------------------------------------------------------------
+    def disconnect(self):
+      if self.image_list is not None and len(self.image_list) > 0 and self.current_ind in range(len(self.image_list)):
+        self.saveCurrentState(writeToMaster=True)
         self.initData()
         self.updateUI()
       logging.info('Disconnecting TT segmentation tool')
@@ -300,7 +244,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       sw = lm.sliceWidget('Red')
       self.interactor = sw.interactorStyle().GetInteractor()
       if add:
-        self.patchEditorObserver = self.interactor.AddObserver(vtk.vtkCommand.LeftButtonPressEvent, self.OnClick)
+        self.patchEditorObserver = self.interactor.AddObserver(vtk.vtkCommand.LeftButtonPressEvent, self.onClick)
       elif self.patchEditorObserver is not None:
         self.interactor.RemoveObserver(self.patchEditorObserver)
 
@@ -318,10 +262,14 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
           self.editor.updateWidgetFromMRML()
           # If no segmentation node exists then create one so that the user does not have to create one manually
           self.updateEditorSources()
+          self.editor.setEnabled(True)
+          self.ui.showSegmentationCheckBox.setCheckState(qt.Qt.Checked)
         else:
           self.ui.segmentEditorWidget.setActiveEffect(None)
           self.ui.segmentEditorWidget.removeViewObservations()
           self.ui.segmentEditorWidget.uninstallKeyboardShortcuts()
+          self.editor.setEnabled(False)
+          self.ui.showSegmentationCheckBox.setCheckState(qt.Qt.Unchecked)
       except Exception as e:
         logging.error('Error setting up or closing the segment editor effect. ')
         self.segmentEditModeOn = False
@@ -404,7 +352,6 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
   #------------------------------------------------------------------------------
     def updateNavigationUI(self):
-      logging.debug('In updatenavui')
       if self.ui == None:
         return
       ind = None
@@ -561,8 +508,8 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         return
       dn = self.segmentation_node.GetDisplayNode()
       dn.SetVisibility(state)
-      if self.ui is not None:
-        self.ui.segmentEditorWidget.setEnabled(state)
+      # if self.ui is not None:
+      #   self.ui.segmentEditorWidget.setEnabled(state)
 
     #------------------------------------------------------------------------------
     def onSavePatchesButtonClicked(self):
@@ -593,8 +540,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     #------------------------------------------------------------------------------
     #------------------------------------------------------------------------------
-    def OnClick(self, caller, event):
-      logging.debug('Inside the onclick')
+    def onClick(self, caller, event):
       if len(self.image_list) == 0 or \
         self.path_to_server is None or \
           self.current_ind not in range(len(self.image_list)):
@@ -723,7 +669,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if not new_output_dir.is_dir():
           new_output_dir.mkdir(parents=True)
       progress = qt.QProgressDialog("Loading Master CSV", "Abort Load", 0, len(image_list), self.parent)
-      # progress.setWindowModality(qt.Qt.WindowModal)
+      progress.setWindowModality(qt.Qt.WindowModal)
 
       for row_id, row in enumerate(image_list):
         progress.setValue(row_id)
@@ -731,9 +677,8 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
           break
 
         if len(row['image path']) ==0 or len(row['segmentation path']) == 0:
-          logging.error('Found an empty Image path or Segmentation path in the master file')
-          self.image_list = []
-          break
+          logging.error('Found an empty Image path or Segmentation path in the master file, image: {}, seg: {}'.format(row['image path'], row['segmentation path']))
+          continue
         row['image path'] = self.path_to_server / row['image path']
         row['segmentation path'] = self.path_to_server / row['segmentation path']
         create_new = False
@@ -847,10 +792,8 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if self.current_ind not in range(len(self.image_list)):
         logging.debug('The current index is not in range of image list, nothing to do here.')
       else:
-        self.saveCurrentImagePatchInfo()
-        self.updateMasterDictAndTable()
-        self.saveCurrentRowToMaster()
-      
+        self.saveCurrentState()
+
       self.current_ind = new_ind
 
       if self.current_ind not in range(len(self.image_list)):
@@ -873,7 +816,6 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     #------------------------------------------------------------------------------
     #------------------------------------------------------------------------------  
     def onImageIndexChanged(self, scroll_pos):
-      logging.debug('New IND: {}, Self: {}'.format(scroll_pos-1, self.current_ind))
       self.changeCurrentImageInd(scroll_pos-1)
 
     #------------------------------------------------------------------------------
@@ -882,7 +824,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if self.image_list is not None and self.ui is not None\
         and self.current_ind in range(len(self.image_list)):
           new_ind = self.findNextNonGradedInd()
-          logging.debug('New IND: {}, Self: {}'.format(new_ind, self.current_ind))
+          logging.debug('Nexe ungraded image index: {}, Self: {}'.format(new_ind, self.current_ind))
           self.ui.imageNavigationScrollBar.setValue(new_ind+1)
 
     #------------------------------------------------------------------------------
@@ -964,7 +906,6 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------  
     def loadCurrentSegmentation(self):
-      logging.debug('in loadCurrentSegmentation')
       if len(self.image_list) == 0 or self.path_to_image_details is None: 
         slicer.util.errorDisplay('Show image at current IND: Need to chose an image list and path to the images - make sure those are in')
         return
@@ -987,14 +928,24 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         dn.SetVisibility2DFill(1)
         visibility = self.ui.showSegmentationCheckBox.isChecked()
         dn.SetVisibility(visibility)
+        # Deal with segment names:
+        current_segmentation = self.segmentation_node.GetSegmentation()
+        number_of_segments = current_segmentation.GetNumberOfSegments()
+        segment_label_names = {1:'EyeBall', 2:'Pupil'}
+        for segment_number in range(number_of_segments):
+          label = current_segmentation.GetNthSegment(segment_number).GetLabelValue()
+          name = current_segmentation.GetNthSegment(segment_number).GetName()
+          if label in segment_label_names and name != segment_label_names[label]:
+            current_segmentation.GetNthSegment(segment_number).SetName(segment_label_names[label])
+
         if self.ui is not None and self.editor is not None:
           self.selectParameterNode()
           self.updateEditorSources()
           if self.ui is not None and self.editor is not None:
-            self.editor.setEnabled(visibility)
+            self.editor.setEnabled(self.segmentEditModeOn)
 
       except Exception as e:
-        slicer.util.errorDisplay("Couldn't load imagepath: {}\n ERROR: {}".format(imgpath, e))
+        slicer.util.errorDisplay("Couldn't load segmentation: {}\n ERROR: {}".format(imgpath, e))
         self.segmentation_node = None
 
   #------------------------------------------------------------------------------
@@ -1038,7 +989,6 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------  
     def loadExistingPatches(self):
-      logging.debug('in: loadExistingPatches')
       if len(self.image_list) == 0 or \
         self.path_to_server is None or \
           self.current_ind < 0 or self.current_ind >= len(self.image_list):
@@ -1046,7 +996,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         return
 
       if self.ui.imagePatchesTableWidget is None:
-        logging.warning('Image Patches table is None, returning from saveCurrentImagePatchInfo')
+        logging.warning('Image Patches table is None, returning from loadExistingPatches')
         return
 
       csv_file_path = self.getCurrentPatchFilePath()
@@ -1121,6 +1071,32 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
           logging.error('ERROR durign key parsing.\n {}'.format(e))
           slicer.util.errorDisplay('Error during key parsing for the final write')
           return False
+
+    def saveCurrentSegmentation(self):
+      if len(self.image_list) == 0 or \
+        self.path_to_server is None or \
+          self.current_ind not in range(len(self.image_list)):
+        logging.warning('Cannot save current patch info: Select a valid csv file and point to a correct folder with images')
+        return
+
+      if self.image_node is None or self.segmentation_node is None:
+        logging.warning('Nothing to save')
+        return
+
+      labelmapVolumeNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode')
+      slicer.modules.segmentations.logic().ExportVisibleSegmentsToLabelmapNode(self.segmentation_node, labelmapVolumeNode, self.image_node)
+      out_segmentation_path = self.getCurrentSegmentationFilePath()
+      print(self.image_node.GetName())
+      if not out_segmentation_path:
+        out_dir = self.path_to_image_details.parent / ('segmentations_' + self.ui.usernameLineEdit.text)
+        if not out_dir.is_dir():
+          out_dir.mkdir(parents=True)
+        out_segmentation_path = out_dir / self.image_node.GetName()+".nrrd"
+        self.image_list[self.current_ind]['segmentation path'] = out_segmentation_path
+      slicer.util.saveNode(labelmapVolumeNode, str(out_segmentation_path))
+      slicer.mrmlScene.RemoveNode(labelmapVolumeNode.GetDisplayNode().GetColorNode())
+      slicer.mrmlScene.RemoveNode(labelmapVolumeNode)
+      # slicer.util.delayDisplay("Segmentation saved to {}".format(out_segmentation_path))
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------  
@@ -1216,13 +1192,11 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------  
     def updateFiducialSelection(self, row):
-      logging.debug('In updatefiducial selection')
       if row not in range(self.ui.imagePatchesTableWidget.rowCount):
         return
 
       comboBoxLabel = self.ui.patchLabelComboBox.currentText
       tableLabel = self.ui.imagePatchesTableWidget.item(row, 1).text()
-      logging.debug('Combobox label: {}, tablelabel: {}'.format(comboBoxLabel, tableLabel))
       if tableLabel != comboBoxLabel:
         all_labels = [self.ui.patchLabelComboBox.itemText(i) for i in range(self.ui.patchLabelComboBox.count)]
         if tableLabel not in all_labels:
@@ -1235,7 +1209,6 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if len(fid) > 0:
         fidNode = slicer.util.getNode(fid)
         fiducialCount = fidNode.GetNumberOfFiducials()
-        logging.debug('Fiducial count is: {}'.format(fiducialCount))
         if row in range(fiducialCount):
           for r in range(fiducialCount):
             if r == row:
