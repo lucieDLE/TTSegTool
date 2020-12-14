@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>538</width>
-    <height>907</height>
+    <height>1047</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -317,7 +317,7 @@
        </widget>
       </item>
       <item>
-       <widget class="qMRMLSegmentEditorWidget" name="SegmentEditorWidget"/>
+       <widget class="qMRMLSegmentEditorWidget" name="segmentEditorWidget"/>
       </item>
      </layout>
     </widget>

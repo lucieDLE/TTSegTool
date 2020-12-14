@@ -11,17 +11,42 @@ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
 
-class SliceletMainFrame(qt.QDialog):
-    def __init__(self):
-      qt.QDialog.__init__(self)
-      self.slicelet = None
+class TTSegToolFileDialog():
+  """This specially named class is detected by the scripted loadable
+  module and is the target for optional drag and drop operations.
+  See: Base/QTGUI/qSlicerScriptedFileDialog.h.
 
-    def setSlicelet(self, slicelet):
-      self.slicelet = slicelet
+  This class is used for overriding default scene save dialog
+  with simple saving the scene without asking anything.
+  """
 
-    def hideEvent(self, event):
-      self.slicelet.disconnect()
-      self.slicelet = None
+  def __init__(self,qSlicerFileDialog ):
+    self.qSlicerFileDialog = qSlicerFileDialog
+    qSlicerFileDialog.fileType = 'NoFile'
+    qSlicerFileDialog.description = 'Save scene'
+    qSlicerFileDialog.action = slicer.qSlicerFileDialog.Write
+
+  def execDialog(self):
+    # Implement custom scene save operation here.
+    # Return True if saving completed successfully,
+    # return False if saving was cancelled.
+    writeStatus = slicer.modules.TTSegToolWidget.writeFinalMasterCSV()
+    if writeStatus:
+      slicer.util.infoDisplay('Wrote the TT master CSV successfully')
+    print('WriteStatus is: {}'.format(writeStatus))
+    return writeStatus
+
+# class SliceletMainFrame(qt.QDialog):
+#     def __init__(self):
+#       qt.QDialog.__init__(self)
+#       self.slicelet = None
+
+#     def setSlicelet(self, slicelet):
+#       self.slicelet = slicelet
+
+#     def hideEvent(self, event):
+#       self.slicelet.disconnect()
+#       self.slicelet = None
 
 # class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
@@ -106,6 +131,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         uiWidget.minimumWidth = int(w*0.4)
         self.layout.addWidget(uiWidget)
         self.ui = slicer.util.childWidgetVariables(uiWidget)
+        self.setupSegmentEditor()
         self.setupConnections()
 
       slicer.app.layoutManager().setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutOneUpRedSliceView)
@@ -125,13 +151,17 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
       iconPath = os.path.join(os.path.dirname(__file__), 'Resources/Icons', self.moduleName+'.png')
 
-
       # setup self connections
       self.crosshairNode=slicer.util.getNode('Crosshair')
       # self.parent.show()
-    
+
     def exit(self):
-      self.disconnect()
+      if self.patchEditModeOn:
+        self.switchPatchEditMode()
+      if self.segmentEditModeOn:
+        self.switchSegmentEditMode()
+      if self.effectFactorySingleton:
+        self.effectFactorySingleton.disconnect('effectRegistered(QString)', self.editorEffectRegistered)
 
     #----------------------------------------------------------------------------------------
     def showSingleModule(self, singleModule=True, toggle=False):
@@ -163,7 +193,6 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if singleModule:
         slicer.util.setPythonConsoleVisible(self.developerMode)
 
-
     #------------------------------------------------------------------------------
     def disconnect(self):
       if self.image_list is not None and len(self.image_list) > 0 and self.current_ind in range(len(self.image_list)):
@@ -171,10 +200,8 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.saveCurrentImagePatchInfo()
         self.saveCurrentRowToMaster()
         self.writeFinalMasterCSV()
-        slicer.util.infoDisplay("Saved the current state for TT Segmentation tool len(self.image_list): {}".format(len(self.image)))
         self.initData()
         self.updateUI()
-        
       logging.info('Disconnecting TT segmentation tool')
 
   #### CONNECTIONS #####
@@ -229,6 +256,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if self.ui is None:
         return
 
+      self.handleSegmentModeOnOFf()
       self.ui.startSegmentEditModeButton.setChecked(self.segmentEditModeOn)
       if self.segmentEditModeOn:
         self.ui.startSegmentEditModeButton.setStyleSheet("QPushButton {background-color: rgb(214, 0, 0)}")
@@ -245,6 +273,23 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
       self.segmentEditModeOn = not self.segmentEditModeOn
       self.setupSegmentEditMode()
+    
+    #------------------------------------------------------------------------------
+    def setupSegmentEditor(self):
+      self.editor = self.ui.segmentEditorWidget
+      self.editor.setMaximumNumberOfUndoStates(10)
+      # Set parameter node first so that the automatic selections made when the scene is set are saved
+      self.selectParameterNode()
+      self.editor.setMRMLScene(slicer.mrmlScene)
+      import qSlicerSegmentationsEditorEffectsPythonQt
+      #TODO: For some reason the instance() function cannot be called as a class function although it's static
+      factory = qSlicerSegmentationsEditorEffectsPythonQt.qSlicerSegmentEditorEffectFactory()
+      self.effectFactorySingleton = factory.instance()
+      self.effectFactorySingleton.connect('effectRegistered(QString)', self.editorEffectRegistered)
+
+    #------------------------------------------------------------------------------
+    def editorEffectRegistered(self):
+      self.editor.updateEffectList()
 
     #------------------------------------------------------------------------------
     def setupLayoutConnections(self, add=True):
@@ -259,6 +304,56 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       elif self.patchEditorObserver is not None:
         self.interactor.RemoveObserver(self.patchEditorObserver)
 
+    #------------------------------------------------------------------------------
+    def handleSegmentModeOnOFf(self):
+      if self.ui is None or len(self.image_list)==0 or self.current_ind not in range(len(self.image_list)) or self.editor is None:
+        return
+      try:
+        if self.segmentEditModeOn:
+          # Allow switching between effects and selected segment using keyboard shortcuts
+          self.editor.installKeyboardShortcuts()
+          self.editor.setupViewObservations()
+          # Set parameter set node if absent
+          self.selectParameterNode()
+          self.editor.updateWidgetFromMRML()
+          # If no segmentation node exists then create one so that the user does not have to create one manually
+          self.updateEditorSources()
+        else:
+          self.ui.segmentEditorWidget.setActiveEffect(None)
+          self.ui.segmentEditorWidget.removeViewObservations()
+          self.ui.segmentEditorWidget.uninstallKeyboardShortcuts()
+      except Exception as e:
+        logging.error('Error setting up or closing the segment editor effect. ')
+        self.segmentEditModeOn = False
+    
+    #------------------------------------------------------------------------------
+    def updateEditorSources(self):
+      if self.image_node is not None:
+        segmentationNode = self.segmentation_node
+        if not segmentationNode:
+          segmentationNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode')
+          self.segmentation_node = segmentationNode
+        self.editor.setSegmentationNode(segmentationNode)
+        self.editor.setMasterVolumeNode(self.image_node)
+
+    #------------------------------------------------------------------------------
+    def selectParameterNode(self):
+      if self.editor is None:
+        return
+      # Select parameter set node if one is found in the scene, and create one otherwise
+      segmentEditorSingletonTag = "SegmentEditor"
+      segmentEditorNode = slicer.mrmlScene.GetSingletonNode(segmentEditorSingletonTag, "vtkMRMLSegmentEditorNode")
+      if segmentEditorNode is None:
+        segmentEditorNode = slicer.mrmlScene.CreateNodeByClass("vtkMRMLSegmentEditorNode")
+        segmentEditorNode.UnRegister(None)
+        segmentEditorNode.SetSingletonTag(segmentEditorSingletonTag)
+        segmentEditorNode = slicer.mrmlScene.AddNode(segmentEditorNode)
+      if self.parameterSetNode == segmentEditorNode:
+        # nothing changed
+        return
+      self.parameterSetNode = segmentEditorNode
+      self.editor.setMRMLSegmentEditorNode(self.parameterSetNode)
+
   ##### Data cleanup/initialization ############
     #------------------------------------------------------------------------------
     def setDefaultParamaters(self):
@@ -266,7 +361,6 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.path_to_image_details = None
       self.image_node = None # holds the current image
       self.segmentation_node = None # holds the current segmentation
-      self.segmentation_editor_node = None # holds the current segment editor node
       self.interactor = None
       self.crosshairNode = None
       self.user_name = None
@@ -275,6 +369,10 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.patcheEditShortcut = None
       self.patchEditModeOn = False
       self.segmentEditModeOn = False
+      self.parameterSetNode = None # holds the current segment editor
+      self.editor = None # holds the segment editor UI widget
+      self.effectFactorySingleton = None
+
       self.initData()
       self.updateUI()
 
@@ -292,7 +390,6 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         utility.MRMLUtility.removeMRMLNode(self.image_node)
       if self.segmentation_node is not None:
         utility.MRMLUtility.removeMRMLNode(self.segmentation_node)
-        utility.MRMLUtility.removeMRMLNode(self.segmentation_editor_node)
       # self.updateNavigationUI()
 
   ##### UI Updates ###########
@@ -335,7 +432,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.imageDetailsTable.selectRow(self.current_ind)
 
 
-  ############ Fiducial hanling ###############
+  ############ Fiducial handling ###############
     #------------------------------------------------------------------------------
     def updateFiducialLabel(self, index):
       if len(self.image_list) == 0 or \
@@ -465,7 +562,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       dn = self.segmentation_node.GetDisplayNode()
       dn.SetVisibility(state)
       if self.ui is not None:
-        self.ui.SegmentEditorWidget.setEnabled(state)
+        self.ui.segmentEditorWidget.setEnabled(state)
 
     #------------------------------------------------------------------------------
     def onSavePatchesButtonClicked(self):
@@ -764,7 +861,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if self.patchEditModeOn:
         self.switchPatchEditMode()
       
-      if self.segmentEditModeOn():
+      if self.segmentEditModeOn:
         self.switchSegmentEditMode()
 
       if self.current_ind >=0 and len(self.image_list) > 0:
@@ -878,29 +975,27 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       try:
         if self.segmentation_node is not None:
           utility.MRMLUtility.removeMRMLNode(self.segmentation_node)
-          utility.MRMLUtility.removeMRMLNode(self.segmentation_editor_node)
-        #utility.MRMLUtility.loadMRMLNode('image_node', self.path_to_server, self.image_list[self.current_ind] + '.jpg', 'VolumeFile') 
+          self.segmentation_node = None
+          # utility.MRMLUtility.removeMRMLNode(self.segmentation_editor_node)
+        
         # TODO: Rename the segmentations to EyeBall and Pupil
+        if imgpath.exists():
+          self.segmentation_node = slicer.util.loadSegmentation(str(imgpath))
 
-        self.segmentation_node = slicer.util.loadSegmentation(str(imgpath))
         dn = self.segmentation_node.GetDisplayNode()
         dn.SetVisibility2DOutline(0)
         dn.SetVisibility2DFill(1)
-        if self.ui is not None:
-          self.ui.SegmentEditorWidget.setMRMLScene(slicer.mrmlScene)
-          self.segmentation_editor_node = slicer.vtkMRMLSegmentEditorNode()
-          slicer.mrmlScene.AddNode(self.segmentation_editor_node)
-          self.ui.SegmentEditorWidget.setMRMLSegmentEditorNode(self.segmentation_editor_node)
-          self.ui.SegmentEditorWidget.setSegmentationNode(self.segmentation_node)
-          if self.image_node is not None:
-            self.ui.SegmentEditorWidget.setMasterVolumeNode(self.image_node)
-          visibility = self.ui.showSegmentationCheckBox.isChecked()
-          dn.SetVisibility(visibility)
-          if self.ui is not None:
-            self.ui.SegmentEditorWidget.setEnabled(visibility)
+        visibility = self.ui.showSegmentationCheckBox.isChecked()
+        dn.SetVisibility(visibility)
+        if self.ui is not None and self.editor is not None:
+          self.selectParameterNode()
+          self.updateEditorSources()
+          if self.ui is not None and self.editor is not None:
+            self.editor.setEnabled(visibility)
 
       except Exception as e:
         slicer.util.errorDisplay("Couldn't load imagepath: {}\n ERROR: {}".format(imgpath, e))
+        self.segmentation_node = None
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------  
@@ -1017,13 +1112,15 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
               writer.writerow(row)
           from shutil import copyfile
           copyfile(path, self.path_to_image_details)
-          slicer.util.infoDisplay('Wrote successfully output csv files')
+          return True
         except IOError as e:
           logging.error('ERROR Writing out the master csv file.\n {}'.format(e))
           slicer.util.errorDisplay('ERROR Writing out the master csv file.\n {}'.format(e))
+          return False
         except KeyError as e:
           logging.error('ERROR durign key parsing.\n {}'.format(e))
           slicer.util.errorDisplay('Error during key parsing for the final write')
+          return False
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------  
