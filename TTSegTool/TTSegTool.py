@@ -1146,8 +1146,11 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def writeFinalMasterCSV(self):
       if len(self.image_list) > 0 and self.path_to_server is not None:
         csv_file_name = self.path_to_image_details.name
-        csv_file_name = csv_file_name.replace('.csv', '_{}.csv'.format(self.ui.usernameLineEdit.text))
-        path = self.path_to_image_details.parent / csv_file_name
+        csv_file_name = csv_file_name.replace('.csv', '_{}.csv'.format(self.user_name))
+        if self.temp_path:
+          path = self.temp_path / csv_file_name
+        else:
+          path = self.path_to_image_details.parent / csv_file_name
         try:
           with open(path, 'w', newline='') as fh:
             fieldnames = self.image_list[0].keys()
