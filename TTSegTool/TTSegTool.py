@@ -11,6 +11,22 @@ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
 
+class CloseApplicationEventFilter(qt.QWidget):
+  def eventFilter(self, object, event):
+    if event.type() ==  qt.QEvent.Close:
+      filedialog = TTSegToolFileDialog(slicer.qSlicerFileDialog)
+      r = filedialog.exec()
+      print('REturned: {}'.format(r))
+
+      self.closeWindowEvent(event)
+      event.accept()
+      slicer.util.quit()
+      return True
+    return False
+  
+  def closeWindowEvent(self, event):
+    TTSegToolFileDialog.execDialog()
+
 class TTSegToolFileDialog():
   """This specially named class is detected by the scripted loadable
   module and is the target for optional drag and drop operations.
@@ -77,6 +93,10 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     
       self.segmentEditShortcut = qt.QShortcut(qt.QKeySequence('s'), self.parent)
       self.segmentEditShortcut.connect('activated()', self.switchSegmentEditMode)
+
+      
+      self.filter = CloseApplicationEventFilter()
+      slicer.util.mainWindow().installEventFilter(self.filter)
     
       self.isSingleModuleShown = False
       slicer.util.mainWindow().setWindowTitle("TT Segmentation Tool")
@@ -133,7 +153,8 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if self.image_list is not None and len(self.image_list) > 0 and self.current_ind in range(len(self.image_list)):
         self.updateMasterDictAndTable()
         self.saveCurrentImagePatchInfo()
-        self.saveCurrentSegmentation()
+        if self.save_segmentation_flag:
+          self.saveCurrentSegmentation()
         self.saveCurrentRowToMaster()
         if writeToMaster:
             # Need this for final save out. This might be cheesy, and probably shoudl be done for all above
@@ -205,6 +226,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if self.segmentEditModeOn:
         self.ui.startSegmentEditModeButton.setStyleSheet("QPushButton {background-color: rgb(214, 0, 0)}")
         self.ui.startSegmentEditModeButton.setText("   STOP SEGMENTATION EDIT MODE   ")
+        self.save_segmentation_flag = True
       else:
         self.ui.startSegmentEditModeButton.setStyleSheet("QPushButton {background-color: rgb(85, 170, 0)}")
         self.ui.startSegmentEditModeButton.setText("   START SEGMENTATION EDIT MODE   ")
@@ -307,6 +329,8 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def setDefaultParamaters(self):
       self.path_to_server = None
       self.path_to_image_details = None
+      self.segment_out_dir_path = None
+      self.temp_path = None
       self.image_node = None # holds the current image
       self.segmentation_node = None # holds the current segmentation
       self.interactor = None
@@ -317,6 +341,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.patcheEditShortcut = None
       self.patchEditModeOn = False
       self.segmentEditModeOn = False
+      self.save_segmentation_flag = False
       self.parameterSetNode = None # holds the current segment editor
       self.editor = None # holds the segment editor UI widget
       self.effectFactorySingleton = None
@@ -396,6 +421,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if row in range(fidNode.GetNumberOfFiducials()):
           fidNode.SetNthFiducialLabel(row, new_label)
           self.ui.imagePatchesTableWidget.item(row, 1).setText(new_label)
+          self.updateMasterDictAndTable()
 
   #------------------------------------------------------------------------------
     def addFiducial(self, row_id, ras, label=None):
@@ -728,18 +754,25 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
           row['n epi'] = len( [l for l in patch_rows if l['label'] == 'Epilation'] )
           row['n probepi'] = len( [l for l in patch_rows if l['label'] == 'Probable Epilation'] )
           row['n healthy'] = len( [l for l in patch_rows if l['label'] == 'Healthy'] )
-          row['n healthy'] = len( [l for l in patch_rows if l['label'] == 'Unknown'] )
+          row['n none'] = len( [l for l in patch_rows if l['label'] == 'Unknown'] )
         self.image_list.append(row)
       progress.setValue(len(image_list))
       logging.debug('Number of images read: {}'.format(len(self.image_list)))
       # create a time stamped temp file
       if len(self.image_list) > 0:
+        self.segment_out_dir_path = self.path_to_image_details.parent / ('Segmentations_' + self.user_name)
+        if not self.segment_out_dir_path.is_dir():
+            self.segment_out_dir_path.mkdir(parents=True)
+        self.temp_path = self.path_to_image_details.parent / ('_tmp_' + self.user_name)
+        if not self.temp_path.is_dir():
+            self.temp_path.mkdir(parents=True)
+
         csv_file_name = self.path_to_image_details.name
         from datetime import datetime
         curDTObj = datetime.now()
         datetimeStr = curDTObj.strftime("%Y%m%d_%H%M%S")
         csv_file_name = csv_file_name.replace('.csv', '_{}_{}.csv'.format(self.ui.usernameLineEdit.text, datetimeStr))
-        self.tmp_csv_file_name = self.path_to_image_details.parent / csv_file_name
+        self.tmp_csv_file_name = self.temp_path / csv_file_name
         fieldnames = self.image_list[0].keys()
         logging.debug('TEMP FILE NAME IS: {}'.format(self.tmp_csv_file_name))
         with open(self.tmp_csv_file_name, 'w', newline='') as fh:
@@ -903,41 +936,59 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         else:
           slicer.util.errorDisplay("Couldn't find images from the list in directory: {}".format(self.path_to_image_details))
 
+    def setSegmentationLabelNames(self):
+      if self.segmentation_node is None:
+        return
+
+      current_segmentation = self.segmentation_node.GetSegmentation()
+      number_of_segments = current_segmentation.GetNumberOfSegments()
+      segment_label_names = {1:'EyeBall', 2:'Cornea', 3:'EyeLid'}
+      for segment_number in range(number_of_segments):
+        label = current_segmentation.GetNthSegment(segment_number).GetLabelValue()
+        name = current_segmentation.GetNthSegment(segment_number).GetName()
+        if label in segment_label_names and name != segment_label_names[label]:
+          current_segmentation.GetNthSegment(segment_number).SetName(segment_label_names[label])
+
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------  
     def loadCurrentSegmentation(self):
       if len(self.image_list) == 0 or self.path_to_image_details is None: 
-        slicer.util.errorDisplay('Show image at current IND: Need to chose an image list and path to the images - make sure those are in')
+        logging.warning('Show image at current IND: Need to chose an image list and path to the images - make sure those are in')
         return
       if self.current_ind < 0 not in range(len(self.image_list)):
-        slicer.util.warningDisplay("Wrong image index: {}".format(self.current_ind))
+        logging.warning("Wrong image index: {}".format(self.current_ind))
       
       imgpath = self.image_list[self.current_ind]['segmentation path']
+      if not imgpath or not imgpath.exists():
+        slicer.util.infodisplay("Could not load segmenation: {}, does not exist".format(imgpath))
+        return
+
       try:
         if self.segmentation_node is not None:
           utility.MRMLUtility.removeMRMLNode(self.segmentation_node)
           self.segmentation_node = None
           # utility.MRMLUtility.removeMRMLNode(self.segmentation_editor_node)
-        
-        # TODO: Rename the segmentations to EyeBall and Pupil
-        if imgpath.exists():
-          self.segmentation_node = slicer.util.loadSegmentation(str(imgpath))
+
+        self.segmentation_node = slicer.util.loadSegmentation(str(imgpath))
+        if self.image_node is not None:
+          self.segmentation_node.SetReferenceImageGeometryParameterFromVolumeNode(self.image_node)
 
         dn = self.segmentation_node.GetDisplayNode()
         dn.SetVisibility2DOutline(0)
         dn.SetVisibility2DFill(1)
         visibility = self.ui.showSegmentationCheckBox.isChecked()
         dn.SetVisibility(visibility)
+
         # Deal with segment names:
         current_segmentation = self.segmentation_node.GetSegmentation()
         number_of_segments = current_segmentation.GetNumberOfSegments()
-        segment_label_names = {1:'EyeBall', 2:'Pupil'}
-        for segment_number in range(number_of_segments):
-          label = current_segmentation.GetNthSegment(segment_number).GetLabelValue()
-          name = current_segmentation.GetNthSegment(segment_number).GetName()
-          if label in segment_label_names and name != segment_label_names[label]:
-            current_segmentation.GetNthSegment(segment_number).SetName(segment_label_names[label])
+        if number_of_segments < 3:
+          # most probably eyelid is not there, create it
+          self.createEyelidSegment()
+          current_segmentation = self.segmentation_node.GetSegmentation()
+          number_of_segments = current_segmentation.GetNumberOfSegments()
 
+        self.setSegmentationLabelNames()
         if self.ui is not None and self.editor is not None:
           self.selectParameterNode()
           self.updateEditorSources()
@@ -947,6 +998,57 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       except Exception as e:
         slicer.util.errorDisplay("Couldn't load segmentation: {}\n ERROR: {}".format(imgpath, e))
         self.segmentation_node = None
+
+    def createEyelidSegment(self):
+      if self.segmentation_node is None or self.image_node is None:
+        return
+
+      current_segmentation = self.segmentation_node.GetSegmentation()
+      number_of_segments = current_segmentation.GetNumberOfSegments()
+      if number_of_segments > 2:
+        # Most probably has an eyelid already, return
+        return
+
+      # Export segment as vtkImageData (via temporary labelmap volume node)
+      segmentIds = vtk.vtkStringArray()
+      current_segmentation.GetSegmentIDs(segmentIds)
+      labelmapVolumeNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode')
+      slicer.modules.segmentations.logic().ExportSegmentsToLabelmapNode(self.segmentation_node, segmentIds, labelmapVolumeNode, self.image_node, slicer.vtkSegmentation.EXTENT_REFERENCE_GEOMETRY )
+      # Manipulate the mask values to add the third label
+      mask = slicer.util.arrayFromVolume(labelmapVolumeNode)
+      newmask = mask.copy()
+      newmask[newmask > 0] = mask.max() + 1
+      clone = slicer.modules.volumes.logic().CloneVolume(labelmapVolumeNode, "CloneLabelMap")
+      slicer.util.updateVolumeFromArray(clone, newmask)
+      segmentImageData = clone.GetImageData()
+      kernelSize = [20, 200, 1]
+      erodeDilate = vtk.vtkImageDilateErode3D()
+      erodeDilate.SetInputData(segmentImageData)
+      erodeDilate.SetDilateValue(mask.max() + 1)
+      erodeDilate.SetErodeValue(0)
+      erodeDilate.SetKernelSize(*kernelSize)
+      erodeDilate.Update()
+      segmentImageData.DeepCopy(erodeDilate.GetOutput())
+      newmask = slicer.util.arrayFromVolume(clone)
+      # Combine both the masks together to add the new labelmap.
+      newmask[mask > 0] = 0
+      newmask = newmask + mask
+      slicer.util.updateVolumeFromArray(clone, newmask)
+      segmentIds.InsertNextValue('EyeLid')
+      self.segmentation_node.GetSegmentation().AddEmptySegment('EyeLid')
+      slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(clone, self.segmentation_node, segmentIds)
+      self.setSegmentationLabelNames()
+      
+      # Save this label to image
+      old_state = self.save_segmentation_flag
+      self.save_segmentation_flag = True
+      self.saveCurrentSegmentation()
+      self.save_segmentation_flag = old_state
+
+      slicer.mrmlScene.RemoveNode(labelmapVolumeNode.GetDisplayNode().GetColorNode())
+      slicer.mrmlScene.RemoveNode(labelmapVolumeNode)
+      slicer.mrmlScene.RemoveNode(clone.GetDisplayNode().GetColorNode())
+      slicer.mrmlScene.RemoveNode(clone)
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------  
@@ -1079,23 +1181,37 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         logging.warning('Cannot save current patch info: Select a valid csv file and point to a correct folder with images')
         return
 
+      if not self.save_segmentation_flag:
+        logging.info('Segmentation save has not been set yet. Returning')
+        return
+
       if self.image_node is None or self.segmentation_node is None:
         logging.warning('Nothing to save')
         return
+      if not self.segment_out_dir_path: 
+        logging.warning('Segmentation output path not set, returning')
+        return
 
       labelmapVolumeNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode')
-      slicer.modules.segmentations.logic().ExportVisibleSegmentsToLabelmapNode(self.segmentation_node, labelmapVolumeNode, self.image_node)
+      slicer.modules.segmentations.logic().ExportAllSegmentsToLabelmapNode(self.segmentation_node, labelmapVolumeNode)
       out_segmentation_path = self.getCurrentSegmentationFilePath()
-      print(self.image_node.GetName())
+      if not self.segment_out_dir_path.is_dir():
+        self.segment_out_dir_path.mkdir(parents=True)
+
       if not out_segmentation_path:
-        out_dir = self.path_to_image_details.parent / ('segmentations_' + self.ui.usernameLineEdit.text)
-        if not out_dir.is_dir():
-          out_dir.mkdir(parents=True)
-        out_segmentation_path = out_dir / self.image_node.GetName()+".nrrd"
+        out_segmentation_path = self.segment_out_dir_path / self.image_node.GetName()+".nrrd"
         self.image_list[self.current_ind]['segmentation path'] = out_segmentation_path
+      else:
+        expected_out_path = self.segment_out_dir_path / out_segmentation_path.name
+        if expected_out_path != out_segmentation_path:
+          out_segmentation_path = expected_out_path
+          self.image_list[self.current_ind]['segmentation path'] = out_segmentation_path
+          self.updateMasterDictAndTable()
+
       slicer.util.saveNode(labelmapVolumeNode, str(out_segmentation_path))
       slicer.mrmlScene.RemoveNode(labelmapVolumeNode.GetDisplayNode().GetColorNode())
       slicer.mrmlScene.RemoveNode(labelmapVolumeNode)
+      self.save_segmentation_flag = False
       # slicer.util.delayDisplay("Segmentation saved to {}".format(out_segmentation_path))
 
   #------------------------------------------------------------------------------
@@ -1157,7 +1273,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.image_list[self.current_ind]['n epi'] = len( [row for row in labelColumn if row == 'Epilation'] )
       self.image_list[self.current_ind]['n probepi'] = len( [row for row in labelColumn if row == 'Probable Epilation'] )
       self.image_list[self.current_ind]['n healthy'] = len( [row for row in labelColumn if row == 'Healthy'] )
-      self.image_list[self.current_ind]['n healthy'] = len( [row for row in labelColumn if row == 'Unknown'] )
+      self.image_list[self.current_ind]['n none'] = len( [row for row in labelColumn if row == 'Unknown'] )
 
       # Get the checkbox state.
       checkboxkeys = ['graded', 'blurry','mislabeled']
@@ -1167,7 +1283,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if headerlabel in checkboxkeys:
           state = self.ui.imageDetailsTable.item(self.current_ind, columnid).checkState()
           self.image_list[self.current_ind][headerlabel] = 0 if state==qt.Qt.Unchecked else 1
-        elif headerlabel.startswith('n '):
+        elif headerlabel.startswith('n ') or headerlabel == 'segmentation path':
           self.ui.imageDetailsTable.item(self.current_ind, columnid).setText('{}'.format(self.image_list[self.current_ind][headerlabel]))
 
   #------------------------------------------------------------------------------
