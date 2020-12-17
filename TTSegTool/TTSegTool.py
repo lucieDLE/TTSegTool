@@ -15,12 +15,13 @@ class CloseApplicationEventFilter(qt.QWidget):
   def eventFilter(self, object, event):
     if event.type() ==  qt.QEvent.Close:
       filedialog = TTSegToolFileDialog(slicer.qSlicerFileDialog)
-      r = filedialog.exec()
-      print('REturned: {}'.format(r))
+      r = filedialog.execDialog()
+      # print('Returned: {}'.format(r))
 
-      self.closeWindowEvent(event)
-      event.accept()
-      slicer.util.quit()
+      # self.closeWindowEvent(event)
+      # event.accept()
+      if r:
+        slicer.util.quit()
       return True
     return False
   
@@ -49,7 +50,6 @@ class TTSegToolFileDialog():
     writeStatus = slicer.modules.TTSegToolWidget.saveCurrentState(writeToMaster=True)
     if writeStatus:
       slicer.util.infoDisplay('Wrote the TT master CSV successfully')
-    print('WriteStatus is: {}'.format(writeStatus))
     return writeStatus
 
 class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
@@ -179,6 +179,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.ui.saveMasterFileButton.clicked.connect(self.writeFinalMasterCSV)
       self.ui.imageNavigationScrollBar.setTracking(False)
       self.ui.imageNavigationScrollBar.valueChanged.connect(self.onImageIndexChanged)
+      self.ui.findPrevUngradedButton.clicked.connect(self.onFindPrevUngradedClicked)
       self.ui.findUngradedButton.clicked.connect(self.onFindUngradedClicked)
       self.ui.imageDetailsTable.itemClicked.connect(self.onImageDetailsRowClicked)
       # Patch management
@@ -353,6 +354,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def initData(self):
       self.image_list=[]
       self.current_ind = -1
+      self.num_graded = set()
 
       fid = slicer.modules.markups.logic().GetActiveListID()
       if len(fid) > 0:
@@ -391,7 +393,9 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         max = len(self.image_list)
 
       if self.current_ind >= 0 and self.current_ind < max:
-        detailsText = "::: Image {}/{} ::: ID ::: {} ::: Eye ::: {}".format(ind, max, self.image_list[self.current_ind]['cid'], self.image_list[self.current_ind]['eye'])
+        detailsText = "::: Image {}/{} ::: ID ::: {} ::: Eye ::: {} ||| ::: Graded: {}/{} :::".format(
+                      ind, max, self.image_list[self.current_ind]['cid'], self.image_list[self.current_ind]['eye'], len(self.num_graded), max
+                      )
       else:
         detailsText = "Image list empty"
       
@@ -661,6 +665,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.startProcessingFiles()
         self.ui.inputsCollapsibleButton.collapsed = True
         self.fillMasterTable()
+        self.updateNavigationUI()
       # self.parent.show()
 
   #---------------------------------------------------------
@@ -795,9 +800,12 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.imageDetailsTable.setHorizontalHeaderLabels(keys)
         self.ui.imageDetailsTable.horizontalHeader().setVisible(True)
 
+      self.num_graded = set()
       for row in self.image_list:
         row_id = self.ui.imageDetailsTable.rowCount
         self.ui.imageDetailsTable.insertRow(row_id)
+        if row['graded'] == 1:
+          self.num_graded.add(row_id)
         for ind, key in enumerate(keys): # Get in particular oder
           if key in checkboxKeys:
             checkbox = qt.QTableWidgetItem()
@@ -836,7 +844,6 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.updateNavigationUI()
       if self.patchEditModeOn:
         self.switchPatchEditMode()
-      
       if self.segmentEditModeOn:
         self.switchSegmentEditMode()
 
@@ -857,7 +864,16 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if self.image_list is not None and self.ui is not None\
         and self.current_ind in range(len(self.image_list)):
           new_ind = self.findNextNonGradedInd()
-          logging.debug('Nexe ungraded image index: {}, Self: {}'.format(new_ind, self.current_ind))
+          logging.debug('Next ungraded image index: {}, Self: {}'.format(new_ind, self.current_ind))
+          self.ui.imageNavigationScrollBar.setValue(new_ind+1)
+
+    #------------------------------------------------------------------------------
+    #------------------------------------------------------------------------------  
+    def onFindPrevUngradedClicked(self):
+      if self.image_list is not None and self.ui is not None\
+        and self.current_ind in range(len(self.image_list)):
+          new_ind = self.findNextNonGradedInd(forward=False)
+          logging.debug('Next ungraded image index: {}, Self: {}'.format(new_ind, self.current_ind))
           self.ui.imageNavigationScrollBar.setValue(new_ind+1)
 
     #------------------------------------------------------------------------------
@@ -898,21 +914,31 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------  
-    def findNextNonGradedInd(self):
+    def findNextNonGradedInd(self, forward=True):
       if self.image_list is None or \
           self.current_ind not in range(len(self.image_list)):
         return
       first_ind = self.current_ind
-      last_ind = 0
       if 'graded' in self.image_list[first_ind].keys():
-        for ind in range(first_ind+1, len(self.image_list)):
-          if self.image_list[ind]['graded'] == 0:
-            first_ind = ind
-            break
-          else:
-            if ind == len(self.image_list)-1:
-              slicer.util.infoDisplay("Reached the last image, All graded!!")
+        if forward:
+          for ind in range(first_ind+1, len(self.image_list)):
+            if self.image_list[ind]['graded'] == 0:
               first_ind = ind
+              break
+            else:
+              if ind == len(self.image_list)-1:
+                slicer.util.infoDisplay("Reached the last image, All graded from {}!!".format(self.current_ind))
+                first_ind = ind
+        else:
+          # Find the first previous ungraded image
+          for ind in range(first_ind - 1, -1, -1):
+            if self.image_list[ind]['graded'] == 0:
+              first_ind = ind
+              break
+            else:
+              if ind == 0:
+                slicer.util.infoDisplay("Reached the first image, All graded  from {}!!".format(self.current_ind))
+                first_ind = ind
       return first_ind
 
   #------------------------------------------------------------------------------
@@ -1149,8 +1175,10 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         csv_file_name = csv_file_name.replace('.csv', '_{}.csv'.format(self.user_name))
         if self.temp_path:
           path = self.temp_path / csv_file_name
+          print(path)
         else:
           path = self.path_to_image_details.parent / csv_file_name
+          print(path)
         try:
           with open(path, 'w', newline='') as fh:
             fieldnames = self.image_list[0].keys()
@@ -1288,6 +1316,11 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
           self.image_list[self.current_ind][headerlabel] = 0 if state==qt.Qt.Unchecked else 1
         elif headerlabel.startswith('n ') or headerlabel == 'segmentation path':
           self.ui.imageDetailsTable.item(self.current_ind, columnid).setText('{}'.format(self.image_list[self.current_ind][headerlabel]))
+      if self.image_list[self.current_ind]['graded'] == 1:
+        self.num_graded.add(self.current_ind)
+      else:
+        if self.current_ind in self.num_graded:
+          self.num_graded.remove(self.current_ind)
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------
