@@ -842,6 +842,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         return
 
       self.updateNavigationUI()
+      # Turn off the patch edit and segment edit modes
       if self.patchEditModeOn:
         self.switchPatchEditMode()
       if self.segmentEditModeOn:
@@ -981,19 +982,20 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if len(self.image_list) == 0 or self.path_to_image_details is None: 
         logging.warning('Show image at current IND: Need to chose an image list and path to the images - make sure those are in')
         return
-      if self.current_ind < 0 not in range(len(self.image_list)):
+      if self.current_ind not in range(len(self.image_list)):
         logging.warning("Wrong image index: {}".format(self.current_ind))
       
       imgpath = self.image_list[self.current_ind]['segmentation path']
       if not imgpath or not imgpath.exists():
         slicer.util.infodisplay("Could not load segmenation: {}, does not exist".format(imgpath))
+        self.segmentation_node = None
         return
 
       slicer.progressWindow = qt.QProgressDialog("Loading Segmentation for {}".format(imgpath), "Abort Load", 0, 100, slicer.util.mainWindow())
       slicer.progressWindow.setWindowModality(qt.Qt.WindowModal)
       def showProgress(value, text):
         if slicer.progressWindow.wasCanceled:
-          raise 'Segmentation load aborted'
+          raise Exception('Segmentation load aborted')
         slicer.progressWindow.show()
         slicer.progressWindow.activateWindow()
         slicer.progressWindow.setValue(value)
@@ -1040,6 +1042,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.editor.setEnabled(self.segmentEditModeOn)
       except Exception as e:
         slicer.util.errorDisplay("Couldn't load segmentation: {}\n ERROR: {}".format(imgpath, e))
+        logging,error('Failed to load segmentation: {}\n ERROR: {}'.format(imgpath, e))
         self.segmentation_node = None
       slicer.progressWindow.close()
 
@@ -1236,9 +1239,11 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
       if self.image_node is None or self.segmentation_node is None:
         logging.warning('Nothing to save')
+        self.save_segmentation_flag = False
         return
       if not self.segment_out_dir_path: 
         logging.warning('Segmentation output path not set, returning')
+        self.save_segmentation_flag = False
         return
 
       labelmapVolumeNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode')
