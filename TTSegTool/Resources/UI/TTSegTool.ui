@@ -256,7 +256,7 @@
            <string notr="true">QPushButton {background-color: rgb(85, 170, 0)}</string>
           </property>
           <property name="text">
-           <string>    START PATCH  EDIT MODE    </string>
+           <string>    START ADDING PATCHES    </string>
           </property>
           <property name="checkable">
            <bool>true</bool>
