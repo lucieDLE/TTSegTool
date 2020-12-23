@@ -497,8 +497,9 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         detailsText = "Image list empty"
       
       self.ui.imagePosLabel.setText("{}/{}".format(ind,max))
-      self.ui.imageNavigationScrollBar.setMinimum(min)
-      self.ui.imageNavigationScrollBar.setMaximum(max)
+      if max != self.ui.imageNavigationScrollBar.maximum:
+        self.ui.imageNavigationScrollBar.setMinimum(min)
+        self.ui.imageNavigationScrollBar.setMaximum(max)
       self.ui.imageDetailsLabel.setText(detailsText)
       self.ui.imageDetailsTable.setEnabled(self.current_ind >= 0)
       if self.current_ind >= 0:
@@ -931,6 +932,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if self.current_ind not in range(len(self.image_list)):
         logging.debug('The current index is not in range of image list, nothing to do here.')
       else:
+        print('Saving current state, new index is: {}'.format(new_ind))
         self.saveCurrentState()
 
       self.current_ind = new_ind
@@ -951,10 +953,12 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.loadCurrentSegmentation()
       self.updatePatchesTable(clearTable=True)
       self.loadExistingPatches()
+      print('Done with this index****')
 
     #------------------------------------------------------------------------------
     #------------------------------------------------------------------------------  
     def onImageIndexChanged(self, scroll_pos):
+      print('Trying to change to: {}'.format(scroll_pos-1))
       self.changeCurrentImageInd(scroll_pos-1)
 
     #------------------------------------------------------------------------------
@@ -1065,6 +1069,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if self.segmentation_node is None:
         return
 
+      print('In set segmentation label names.')
       current_segmentation = self.segmentation_node.GetSegmentation()
       number_of_segments = current_segmentation.GetNumberOfSegments()
       segment_label_names = {1:'EyeBall', 2:'Cornea', 3:'EyeLid'}
@@ -1093,25 +1098,17 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.segmentation_node = None
         return
 
-      slicer.progressWindow = qt.QProgressDialog("Loading Segmentation for {}".format(imgpath), "Abort Load", 0, 100, slicer.util.mainWindow())
-      slicer.progressWindow.setWindowModality(qt.Qt.WindowModal)
-      def showProgress(value, text):
-        if slicer.progressWindow.wasCanceled:
-          raise Exception('Segmentation load aborted')
-        slicer.progressWindow.show()
-        slicer.progressWindow.activateWindow()
-        slicer.progressWindow.setValue(value)
-        slicer.progressWindow.setLabelText(text)
-        slicer.app.processEvents()
-
       try:
         if self.segmentation_node is not None:
           utility.MRMLUtility.removeMRMLNode(self.segmentation_node)
           self.segmentation_node = None
           # utility.MRMLUtility.removeMRMLNode(self.segmentation_editor_node)
-        
-        showProgress(10, 'Loading segmentation file')
+
         self.segmentation_node = slicer.util.loadSegmentation(str(imgpath))
+        if self.segmentation_node is None:
+          logging.error('Failed to load segmentation IN THE MIDDLE: {}'.format(imgpath))
+          raise Exception('Error loading segmentation IN THE MIDDLE {}'.format(imgpath))
+        
         if self.image_node is not None:
           self.segmentation_node.SetReferenceImageGeometryParameterFromVolumeNode(self.image_node)
 
@@ -1121,22 +1118,20 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         visibility = self.ui.showSegmentationCheckBox.isChecked()
         dn.SetVisibility(visibility)
 
-        showProgress(40, 'Setting up editing environment')
         # Deal with segment names:
         current_segmentation = self.segmentation_node.GetSegmentation()
         number_of_segments = current_segmentation.GetNumberOfSegments()
-        
-        if number_of_segments < 3:
-          showProgress( 50, "Need to create eyelids, please wait.")
+
+        labels = [current_segmentation.GetNthSegment(segment_number).GetLabelValue() for segment_number in range(number_of_segments)]
+        if 3 not in labels:
           # most probably eyelid is not there, create it
           self.createEyelidSegment()
+          slicer.util.delayDisplay('Creating eyelid segment', autoCloseMsec=5000)
           current_segmentation = self.segmentation_node.GetSegmentation()
           number_of_segments = current_segmentation.GetNumberOfSegments()
         else:
-          showProgress( 50, "Setting up segment name")
           self.setSegmentationLabelNames()
 
-        showProgress(90, "Setting up editors")
         if self.ui is not None and self.editor is not None:
           self.selectParameterNode()
           self.updateEditorSources()
@@ -1146,7 +1141,6 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         slicer.util.errorDisplay("Couldn't load segmentation: {}\n ERROR: {}".format(imgpath, e))
         logging.error('Failed to load segmentation: {}\n ERROR: {}'.format(imgpath, e))
         self.segmentation_node = None
-      slicer.progressWindow.close()
 
     def createEyelidSegment(self):
       if self.segmentation_node is None or self.image_node is None:
