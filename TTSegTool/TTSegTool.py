@@ -94,6 +94,11 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.segmentEditShortcut = qt.QShortcut(qt.QKeySequence('s'), self.parent)
       self.segmentEditShortcut.connect('activated()', self.switchSegmentEditMode)
 
+      self.nextImageShortcut = qt.QShortcut(qt.QKeySequence(qt.Qt.Key_Alt + qt.Qt.Key_Down), self.parent)
+      self.nextImageShortcut.connect('activated()', self.moveToNextImageInList)
+    
+      self.prevImageShortcut = qt.QShortcut(qt.QKeySequence(qt.Qt.Key_Alt + qt.Qt.Key_Up), self.parent)
+      self.prevImageShortcut.connect('activated()', self.moveToPrevImageInList)
       
       self.filter = CloseApplicationEventFilter()
       slicer.util.mainWindow().installEventFilter(self.filter)
@@ -185,6 +190,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.ui.findPrevUngradedButton.clicked.connect(self.onFindPrevUngradedClicked)
       self.ui.findUngradedButton.clicked.connect(self.onFindUngradedClicked)
       self.ui.imageDetailsTable.itemClicked.connect(self.onImageDetailsRowClicked)
+      self.ui.imageDetailsTable.itemSelectionChanged.connect(self.onImageDetailsItemSelected)
       # Patch management
       self.ui.keepPatchPushButton.clicked.connect(self.onSavePatchesButtonClicked)
       self.ui.delPatchPushButton.clicked.connect(self.onDelPatchClicked)
@@ -924,15 +930,15 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def changeCurrentImageInd(self, new_ind):
       if self.image_list is None or len(self.image_list) == 0:
         logging.debug('Image list is empty, nothing to do on image index change')
+        print('take 1')
         return
 
       if new_ind == self.current_ind:
         logging.debug('New index the same as the old one, nothing new to do.')
+        print('take 2')
         return
 
-      if self.current_ind not in range(len(self.image_list)):
-        logging.debug('The current index is not in range of image list, nothing to do here.')
-      else:
+      if self.current_ind in range(len(self.image_list)):
         print('Saving current state, new index is: {}'.format(new_ind))
         self.saveCurrentState()
 
@@ -940,6 +946,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
       if self.current_ind not in range(len(self.image_list)):
         logging.debug('The new image index is out of range, nothing to do.')
+        print('take 4')
         return
 
       self.updateNavigationUI()
@@ -955,6 +962,24 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.updatePatchesTable(clearTable=True)
       self.loadExistingPatches()
       print('Done with this index****')
+
+    #------------------------------------------------------------------------------
+    #------------------------------------------------------------------------------  
+    def moveToNextImageInList(self):
+      if self.image_list is None or len(self.image_list) == 0:
+        logging.debug('Image list is empty, nothing to do on image index change')
+        return
+    
+      self.changeCurrentImageInd(self.current_ind+1)
+
+    #------------------------------------------------------------------------------
+    #------------------------------------------------------------------------------  
+    def moveToPrevImageInList(self):
+      if self.image_list is None or len(self.image_list) == 0:
+        logging.debug('Image list is empty, nothing to do on image index change')
+        return
+    
+      self.changeCurrentImageInd(self.current_ind-1)
 
     #------------------------------------------------------------------------------
     #------------------------------------------------------------------------------  
@@ -986,6 +1011,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if self.image_list is None or len(self.image_list) == 0 or\
         self.current_ind not in range(len(self.image_list)):
         logging.debug('Row change has no effect, no image details were found')
+        return
 
       row = item.row()
       col = item.column()
@@ -994,6 +1020,21 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.ui.imageNavigationScrollBar.setValue(row+1)
       # if self.ui is not None:
       #   self.ui.imageDetailsTable.selectRow(self.current_ind)
+    
+    #------------------------------------------------------------------------------
+    #------------------------------------------------------------------------------
+    def onImageDetailsItemSelected(self):
+      if self.image_list is None or len(self.image_list) == 0 or\
+        self.current_ind not in range(len(self.image_list)):
+        logging.debug('Row change has no effect, no image details were found')
+        return
+      item = self.ui.imageDetailsTable.currentItem()
+      row = item.row()
+      col = item.column()
+      if row == self.current_ind:
+        self.ui.imageDetailsTable.selectRow(row)
+      self.ui.imageNavigationScrollBar.setValue(row+1)
+
 
   ### Data processing ######
   #------------------------------------------------------------------------------
