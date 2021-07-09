@@ -607,7 +607,8 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     #------------------------------------------------------------------------------
     #------------------------------------------------------------------------------
     def onInputDirChanged(self, dir_name):
-      self.path_to_server = Path(str(dir_name))
+      self.path_to_server = Path(str(dir_name).replace("\\","/"))
+      print(self.path_to_server)
       if not self.path_to_server.exists():
         logging.error('The directory {} does not exist'.format(self.path_to_server))
 
@@ -662,10 +663,10 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.imageFileButton.setText("Not Selected")
       slicer.util.infoDisplay("Found a list of {} images".format(len(self.image_list)))
       if len(self.image_list) > 0:
-        self.startProcessingFiles()
-        self.ui.inputsCollapsibleButton.collapsed = True
-        self.fillMasterTable()
-        self.updateNavigationUI()
+        if self.startProcessingFiles():
+          self.ui.inputsCollapsibleButton.collapsed = True
+          self.fillMasterTable()
+          self.updateNavigationUI()
       # self.parent.show()
 
   #---------------------------------------------------------
@@ -710,12 +711,12 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if len(row['image path']) ==0 or len(row['segmentation path']) == 0:
           logging.error('Found an empty Image path or Segmentation path in the master file, image: {}, seg: {}'.format(row['image path'], row['segmentation path']))
           continue
-        row['image path'] = self.path_to_server / row['image path']
-        row['segmentation path'] = self.path_to_server / row['segmentation path']
+        row['image path'] = self.path_to_server / row['image path'].lstrip("\\").replace("\\", "/")
+        row['segmentation path'] = self.path_to_server / row['segmentation path'].lstrip("\\").replace("\\","/")
         create_new = False
         try_to_read_patches = False
         if len(row['patches path']) > 0:
-          row['patches path'] = self.path_to_server / row['patches path']
+          row['patches path'] = self.path_to_server / row['patches path'].replace("\\","/")
           if row['patches path'].exists():
             try_to_read_patches = False
           else:
@@ -962,6 +963,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
           self.changeCurrentImageInd(0)
         else:
           slicer.util.errorDisplay("Couldn't find images from the list in directory: {}".format(self.path_to_image_details))
+        return found_at_least_one
 
     def setSegmentationLabelNames(self):
       if self.segmentation_node is None:
@@ -969,7 +971,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
       current_segmentation = self.segmentation_node.GetSegmentation()
       number_of_segments = current_segmentation.GetNumberOfSegments()
-      segment_label_names = {1:'EyeBall', 2:'Cornea', 3:'EyeLid'}
+      segment_label_names = {1:'EyeBall', 2:'Cornea', 3:'EyeLid', 4:'Entropion'}
       for segment_number in range(number_of_segments):
         label = current_segmentation.GetNthSegment(segment_number).GetLabelValue()
         name = current_segmentation.GetNthSegment(segment_number).GetName()
@@ -1042,7 +1044,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.editor.setEnabled(self.segmentEditModeOn)
       except Exception as e:
         slicer.util.errorDisplay("Couldn't load segmentation: {}\n ERROR: {}".format(imgpath, e))
-        logging,error('Failed to load segmentation: {}\n ERROR: {}'.format(imgpath, e))
+        logging.error('Failed to load segmentation: {}\n ERROR: {}'.format(imgpath, e))
         self.segmentation_node = None
       slicer.progressWindow.close()
 
@@ -1082,7 +1084,9 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       newmask = newmask + mask
       slicer.util.updateVolumeFromArray(clone, newmask)
       segmentIds.InsertNextValue('EyeLid')
+      segmentIds.InsertNextValue('Entropion')
       self.segmentation_node.GetSegmentation().AddEmptySegment('EyeLid')
+      self.segmentation_node.GetSegmentation().AddEmptySegment('Entropion')
       slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(clone, self.segmentation_node, segmentIds)
       self.setSegmentationLabelNames()
       
