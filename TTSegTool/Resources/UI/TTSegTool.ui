@@ -118,6 +118,9 @@
           <verstretch>0</verstretch>
          </sizepolicy>
         </property>
+        <property name="mouseTracking">
+         <bool>false</bool>
+        </property>
         <property name="focusPolicy">
          <enum>Qt::TabFocus</enum>
         </property>
@@ -129,6 +132,9 @@
         </property>
         <property name="pageStep">
          <number>1</number>
+        </property>
+        <property name="tracking">
+         <bool>false</bool>
         </property>
         <property name="orientation">
          <enum>Qt::Vertical</enum>
@@ -256,7 +262,7 @@
            <string notr="true">QPushButton {background-color: rgb(85, 170, 0)}</string>
           </property>
           <property name="text">
-           <string>    START PATCH  EDIT MODE    </string>
+           <string>    START ADDING PATCHES    </string>
           </property>
           <property name="checkable">
            <bool>true</bool>

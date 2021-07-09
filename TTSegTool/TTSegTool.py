@@ -47,7 +47,7 @@ class TTSegToolFileDialog():
     # Implement custom scene save operation here.
     # Return True if saving completed successfully,
     # return False if saving was cancelled.
-    writeStatus = slicer.modules.TTSegToolWidget.saveCurrentState(writeToMaster=True)
+    writeStatus = slicer.modules.TTSegToolWidget.exit()
     if writeStatus:
       slicer.util.infoDisplay('Wrote the TT master CSV successfully')
     return writeStatus
@@ -112,12 +112,15 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       # self.parent.show()
 
     def exit(self):
+      status = self.saveCurrentState(writeToMaster=True)
       if self.patchEditModeOn:
         self.switchPatchEditMode()
       if self.segmentEditModeOn:
         self.switchSegmentEditMode()
       if self.effectFactorySingleton:
         self.effectFactorySingleton.disconnect('effectRegistered(QString)', self.editorEffectRegistered)
+      self.removeMarkupObservers()
+      return status
 
     #----------------------------------------------------------------------------------------
     def showSingleModule(self, singleModule=True, toggle=False):
@@ -192,6 +195,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.ui.imagePatchesTableWidget.currentCellChanged.connect(self.updateFiducialSelection)
       # segmentation management
       self.ui.showSegmentationCheckBox.stateChanged.connect(self.changeSegmentationVisibility)
+      self.addMarkupObservers()
 
     #------------------------------------------------------------------------------
     def setupPatchEditMode(self):
@@ -202,11 +206,11 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.ui.startPatchEditModeButton.setChecked(self.patchEditModeOn)
       if self.patchEditModeOn:
         self.ui.startPatchEditModeButton.setStyleSheet("QPushButton {background-color: rgb(214, 0, 0)}")
-        self.ui.startPatchEditModeButton.setText("   STOP PATCH EDIT MODE   ")
+        self.ui.startPatchEditModeButton.setText("   STOP ADDING PATCHES   ")
         
       else:
         self.ui.startPatchEditModeButton.setStyleSheet("QPushButton {background-color: rgb(85, 170, 0)}")
-        self.ui.startPatchEditModeButton.setText("   START PATCH EDIT MODE   ")
+        self.ui.startPatchEditModeButton.setText("   START ADDING PATCHES   ")
 
     #------------------------------------------------------------------------------
     def switchPatchEditMode(self):
@@ -259,10 +263,101 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.editor.updateEffectList()
 
     #------------------------------------------------------------------------------
+    def onMarkupChanged(self, caller,event):
+      markupsNode = caller
+      sliceView = markupsNode.GetAttribute('Markups.MovingInSliceView')
+      movingMarkupIndex = markupsNode.GetDisplayNode().GetActiveControlPoint()
+      if movingMarkupIndex >= 0:
+          pos = [0,0,0]
+          markupsNode.GetNthFiducialPosition(movingMarkupIndex, pos)
+          isPreview = markupsNode.GetNthControlPointPositionStatus(movingMarkupIndex) == slicer.vtkMRMLMarkupsNode.PositionPreview
+          if not isPreview:
+            self.movingMarkupInd = movingMarkupIndex
+            logging.info("Point {0} was moved {1}".format(movingMarkupIndex, pos))
+
+    #------------------------------------------------------------------------------
+    def onMarkupStartInteraction(self, caller, event):
+        markupsNode = caller
+        sliceView = markupsNode.GetAttribute('Markups.MovingInSliceView')
+        movingMarkupIndex = markupsNode.GetDisplayNode().GetActiveControlPoint()
+        # select the corresponding row in the Patches table
+        self.ui.imagePatchesTableWidget.selectRow(movingMarkupIndex)
+        logging.info("Start interaction: point ID = {0}, slice view = {1}".format(movingMarkupIndex, sliceView))
+
+    #------------------------------------------------------------------------------
+    def onMarkupEndInteraction(self, caller, event):
+        markupsNode = caller
+        sliceView = markupsNode.GetAttribute('Markups.MovingInSliceView')
+        movingMarkupIndex = markupsNode.GetDisplayNode().GetActiveControlPoint()
+        logging.info('Updating fiducial selection for :{}'.format(movingMarkupIndex))
+        self.updateFiducialSelection(movingMarkupIndex)
+        # If this markup was moved, update the position, and select the corresponding row in the patches table.
+        if self.movingMarkupInd == movingMarkupIndex and movingMarkupIndex in range(self.ui.imagePatchesTableWidget.rowCount):
+          point_Ras = [0, 0, 0, 1]
+          markupsNode.GetNthFiducialWorldCoordinates(movingMarkupIndex, point_Ras)
+          transformRasToVolumeRas = vtk.vtkGeneralTransform()
+          if self.image_node is not None:
+            slicer.vtkMRMLTransformNode.GetTransformBetweenNodes(None, self.image_node.GetParentTransformNode(), transformRasToVolumeRas)
+            point_VolumeRas = transformRasToVolumeRas.TransformPoint(point_Ras[0:3])
+            # Get voxel coordinates from physical coordinates
+            volumeRasToIjk = vtk.vtkMatrix4x4()
+            self.image_node.GetRASToIJKMatrix(volumeRasToIjk)
+            point_Ijk = [0, 0, 0, 1]
+            volumeRasToIjk.MultiplyPoint(np.append(point_VolumeRas,1.0), point_Ijk)
+            point_Ijk = [ int(round(c)) for c in point_Ijk[0:3] ]
+            imageData = self.image_node.GetImageData()
+            if not imageData:
+              return
+            dims =  imageData.GetDimensions()
+            inimage = True
+            for dim in range(len(point_Ijk)):
+              if point_Ijk[dim] < 0 or point_Ijk[dim] >= dims[dim]:
+                inimage = False
+                logging.debug('Clicked out of frame, returning')
+                break
+            if inimage:
+              self.ui.imagePatchesTableWidget.item(movingMarkupIndex, 0).setText("{},{}".format(point_Ijk[0], point_Ijk[1]))
+          self.movingMarkupInd = -1
+
+    #------------------------------------------------------------------------------
+    def addMarkupObservers(self):
+      fid = slicer.modules.markups.logic().GetActiveListID()
+      if len(fid) == 0:
+        fid = slicer.modules.markups.logic().AddNewFiducialNode()
+      markupsNode = slicer.util.getNode(fid)
+      self.markupsObservers = []
+      self.markupsObservers.append(markupsNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointModifiedEvent, self.onMarkupChanged))
+      self.markupsObservers.append(markupsNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointStartInteractionEvent, self.onMarkupStartInteraction))
+      self.markupsObservers.append(markupsNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointEndInteractionEvent, self.onMarkupEndInteraction))
+
+    def removeMarkupObservers(self):
+      fid = slicer.modules.markups.logic().GetActiveListID()
+      if len(fid) == 0:
+        return
+      if self.markupsObservers is None:
+        return
+
+      markupsNode = slicer.util.getNode(fid)
+      for observer in self.markupsObservers:
+        markupsNode.RemoveObserver(observer)
+      self.markupsObservers = None
+
+    #------------------------------------------------------------------------------
     def setupLayoutConnections(self, add=True):
       if slicer.app.layoutManager() is None:
         logging.warning('Layout widget is not set')
       
+      # if add:
+      #   placeModePersistence = 2
+      #   slicer.modules.markups.logic().StartPlaceMode(placeModePersistence)
+      #   self.addMarkupObservers()
+      # else:
+      #   interactionNode = slicer.mrmlScene.GetNodeByID("vtkMRMLInteractionNodeSingleton")
+      #   interactionNode.SwitchToViewTransformMode()
+      #   # also turn off place mode persistence if required
+      #   interactionNode.SetPlaceModePersistence(0)
+      #   self.removeMarkupObservers()
+
       lm = slicer.app.layoutManager()
       sw = lm.sliceWidget('Red')
       self.interactor = sw.interactorStyle().GetInteractor()
@@ -339,6 +434,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.user_name = None
       self.tmp_csv_file_name = None
       self.patchEditorObserver = None
+      self.markupsObservers = None
       self.patcheEditShortcut = None
       self.patchEditModeOn = False
       self.segmentEditModeOn = False
@@ -355,6 +451,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.image_list=[]
       self.current_ind = -1
       self.num_graded = set()
+      self.movingMarkupInd = -1
 
       fid = slicer.modules.markups.logic().GetActiveListID()
       if len(fid) > 0:
@@ -400,8 +497,9 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         detailsText = "Image list empty"
       
       self.ui.imagePosLabel.setText("{}/{}".format(ind,max))
-      self.ui.imageNavigationScrollBar.setMinimum(min)
-      self.ui.imageNavigationScrollBar.setMaximum(max)
+      if max != self.ui.imageNavigationScrollBar.maximum:
+        self.ui.imageNavigationScrollBar.setMinimum(min)
+        self.ui.imageNavigationScrollBar.setMaximum(max)
       self.ui.imageDetailsLabel.setText(detailsText)
       self.ui.imageDetailsTable.setEnabled(self.current_ind >= 0)
       if self.current_ind >= 0:
@@ -424,6 +522,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         fidNode = slicer.util.getNode(fid)
         if row in range(fidNode.GetNumberOfFiducials()):
           fidNode.SetNthFiducialLabel(row, new_label)
+          # print('updateFiducialLabel {}, ID: {} Label: {}'.format(fid, row, new_label))
           self.ui.imagePatchesTableWidget.item(row, 1).setText(new_label)
           self.updateMasterDictAndTable()
 
@@ -565,7 +664,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
           fidNode.RemoveNthControlPoint(row)
       if self.ui.imagePatchesTableWidget.rowCount > 0:
         self.ui.imagePatchesTableWidget.selectRow( self.ui.imagePatchesTableWidget.rowCount - 1)
-      print('Before updating master: {}'.format(self.ui.imagePatchesTableWidget.rowCount))
+      # print('Before updating master: {}'.format(self.ui.imagePatchesTableWidget.rowCount))
       self.updateMasterDictAndTable()
 
     #------------------------------------------------------------------------------
@@ -834,6 +933,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if self.current_ind not in range(len(self.image_list)):
         logging.debug('The current index is not in range of image list, nothing to do here.')
       else:
+        print('Saving current state, new index is: {}'.format(new_ind))
         self.saveCurrentState()
 
       self.current_ind = new_ind
@@ -854,10 +954,12 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.loadCurrentSegmentation()
       self.updatePatchesTable(clearTable=True)
       self.loadExistingPatches()
+      print('Done with this index****')
 
     #------------------------------------------------------------------------------
     #------------------------------------------------------------------------------  
     def onImageIndexChanged(self, scroll_pos):
+      print('Trying to change to: {}'.format(scroll_pos-1))
       self.changeCurrentImageInd(scroll_pos-1)
 
     #------------------------------------------------------------------------------
@@ -969,6 +1071,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if self.segmentation_node is None:
         return
 
+      print('In set segmentation label names.')
       current_segmentation = self.segmentation_node.GetSegmentation()
       number_of_segments = current_segmentation.GetNumberOfSegments()
       segment_label_names = {1:'EyeBall', 2:'Cornea', 3:'EyeLid', 4:'Entropion'}
@@ -977,6 +1080,10 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         name = current_segmentation.GetNthSegment(segment_number).GetName()
         if label in segment_label_names and name != segment_label_names[label]:
           current_segmentation.GetNthSegment(segment_number).SetName(segment_label_names[label])
+          if label == 3:
+            segmentId = current_segmentation.GetSegmentIdBySegmentName("EyeLid")
+            # Change the display color for eyelid, as the default is not suitable
+            current_segmentation.GetSegment(segmentId).SetColor(0.5,0,0)
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------  
@@ -993,25 +1100,17 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.segmentation_node = None
         return
 
-      slicer.progressWindow = qt.QProgressDialog("Loading Segmentation for {}".format(imgpath), "Abort Load", 0, 100, slicer.util.mainWindow())
-      slicer.progressWindow.setWindowModality(qt.Qt.WindowModal)
-      def showProgress(value, text):
-        if slicer.progressWindow.wasCanceled:
-          raise Exception('Segmentation load aborted')
-        slicer.progressWindow.show()
-        slicer.progressWindow.activateWindow()
-        slicer.progressWindow.setValue(value)
-        slicer.progressWindow.setLabelText(text)
-        slicer.app.processEvents()
-
       try:
         if self.segmentation_node is not None:
           utility.MRMLUtility.removeMRMLNode(self.segmentation_node)
           self.segmentation_node = None
           # utility.MRMLUtility.removeMRMLNode(self.segmentation_editor_node)
-        
-        showProgress(10, 'Loading segmentation file')
+
         self.segmentation_node = slicer.util.loadSegmentation(str(imgpath))
+        if self.segmentation_node is None:
+          logging.error('Failed to load segmentation IN THE MIDDLE: {}'.format(imgpath))
+          raise Exception('Error loading segmentation IN THE MIDDLE {}'.format(imgpath))
+        
         if self.image_node is not None:
           self.segmentation_node.SetReferenceImageGeometryParameterFromVolumeNode(self.image_node)
 
@@ -1021,22 +1120,20 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         visibility = self.ui.showSegmentationCheckBox.isChecked()
         dn.SetVisibility(visibility)
 
-        showProgress(40, 'Setting up editing environment')
         # Deal with segment names:
         current_segmentation = self.segmentation_node.GetSegmentation()
         number_of_segments = current_segmentation.GetNumberOfSegments()
-        
-        if number_of_segments < 3:
-          showProgress( 50, "Need to create eyelids, please wait.")
+
+        labels = [current_segmentation.GetNthSegment(segment_number).GetLabelValue() for segment_number in range(number_of_segments)]
+        if 3 not in labels:
           # most probably eyelid is not there, create it
           self.createEyelidSegment()
+          slicer.util.delayDisplay('Creating eyelid segment', autoCloseMsec=5000)
           current_segmentation = self.segmentation_node.GetSegmentation()
           number_of_segments = current_segmentation.GetNumberOfSegments()
         else:
-          showProgress( 50, "Setting up segment name")
           self.setSegmentationLabelNames()
 
-        showProgress(90, "Setting up editors")
         if self.ui is not None and self.editor is not None:
           self.selectParameterNode()
           self.updateEditorSources()
@@ -1046,7 +1143,6 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         slicer.util.errorDisplay("Couldn't load segmentation: {}\n ERROR: {}".format(imgpath, e))
         logging.error('Failed to load segmentation: {}\n ERROR: {}'.format(imgpath, e))
         self.segmentation_node = None
-      slicer.progressWindow.close()
 
     def createEyelidSegment(self):
       if self.segmentation_node is None or self.image_node is None:
@@ -1383,8 +1479,9 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
           tableLabel = "Unknown"
         label_id = all_labels.index(tableLabel)
         self.ui.patchLabelComboBox.setCurrentIndex(label_id)
-
+        
       fid = slicer.modules.markups.logic().GetActiveListID()
+      # print('In updatefiducialselection: ' + fid)
       if len(fid) > 0:
         fidNode = slicer.util.getNode(fid)
         fiducialCount = fidNode.GetNumberOfFiducials()
