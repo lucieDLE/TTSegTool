@@ -1172,6 +1172,9 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
           slicer.util.delayDisplay('Creating eyelid segment', autoCloseMsec=5000)
           current_segmentation = self.segmentation_node.GetSegmentation()
           number_of_segments = current_segmentation.GetNumberOfSegments()
+        elif number_of_segments == 3:
+          # Would need to create the entropion segment
+          self.createEntropionSegment()
         else:
           self.setSegmentationLabelNames()
 
@@ -1184,6 +1187,29 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         slicer.util.errorDisplay("Couldn't load segmentation: {}\n ERROR: {}".format(imgpath, e))
         logging.error('Failed to load segmentation: {}\n ERROR: {}'.format(imgpath, e))
         self.segmentation_node = None
+
+    def createEntropionSegment(self):
+      if self.segmentation_node is None or self.image_node is None:
+        return
+
+      current_segmentation = self.segmentation_node.GetSegmentation()
+      number_of_segments = current_segmentation.GetNumberOfSegments()
+      if number_of_segments > 3:
+        # Most probably has an entropion segment already, return
+        return
+
+      # Export segment as vtkImageData (via temporary labelmap volume node)
+      segmentIds = vtk.vtkStringArray()
+      current_segmentation.GetSegmentIDs(segmentIds)
+      segmentIds.InsertNextValue('Entropion')
+      self.segmentation_node.GetSegmentation().AddEmptySegment('Entropion')
+      self.setSegmentationLabelNames()
+      
+      # Save this label to image
+      old_state = self.save_segmentation_flag
+      self.save_segmentation_flag = True
+      self.saveCurrentSegmentation()
+      self.save_segmentation_flag = old_state
 
     def createEyelidSegment(self):
       if self.segmentation_node is None or self.image_node is None:
