@@ -57,7 +57,8 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       ScriptedLoadableModuleWidget.__init__(self, parent)
       VTKObservationMixin.__init__(self)
       slicer.mrmlScene.Clear()
-    
+      self.checkboxKeys = ['graded', 'blurry','mislabeled', "pre-tt"]
+
     def setup(self):
       ScriptedLoadableModuleWidget.setup(self)
       slicer.util.mainWindow().showMaximized()
@@ -840,9 +841,12 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
           row['epilation sev'] = int(row['epilation sev'])
         
           # Add any missing keys and initialize a temp file.
-          self.addOptionalKey(row, 'graded')
-          self.addOptionalKey(row, 'blurry')
-          self.addOptionalKey(row, 'mislabeled')
+          for k in self.checkboxKeys:
+            self.addOptionalKey(row, k)
+          # self.addOptionalKey(row, 'graded')
+          # self.addOptionalKey(row, 'blurry')
+          # self.addOptionalKey(row, 'mislabeled')
+          # self.addOptionalKey(row, 'pre-tt')
           self.addOptionalKey(row, 'n samples')
           self.addOptionalKey(row, 'n tt')
           self.addOptionalKey(row, 'n probtt')
@@ -896,8 +900,8 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if self.image_list is None or len(self.image_list) == 0:
         logging.debug('Image list is empty')
         return
-      checkboxKeys = ['graded', 'blurry','mislabeled']
-      keys = [key for key in checkboxKeys]
+
+      keys = [key for key in self.checkboxKeys]
       all_other = [key for key in self.image_list[0].keys() if key not in keys]
       keys.extend(all_other)
       self.ui.imageDetailsTable.enabled = 1
@@ -913,7 +917,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if row['graded'] == 1:
           self.num_graded.add(row_id)
         for ind, key in enumerate(keys): # Get in particular oder
-          if key in checkboxKeys:
+          if key in self.checkboxKeys:
             checkbox = qt.QTableWidgetItem()
             checkstate = qt.Qt.Unchecked if row[key]==0 else qt.Qt.Checked
             checkbox.setCheckState(checkstate)
@@ -1115,7 +1119,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       print('In set segmentation label names.')
       current_segmentation = self.segmentation_node.GetSegmentation()
       number_of_segments = current_segmentation.GetNumberOfSegments()
-      segment_label_names = {1:'EyeBall', 2:'Cornea', 3:'EyeLid', 4:'Entropion'}
+      segment_label_names = {1:'EyeBall', 2:'Cornea', 3:'EyeLid', 4:'EyeLidMargin'}
       for segment_number in range(number_of_segments):
         label = current_segmentation.GetNthSegment(segment_number).GetLabelValue()
         name = current_segmentation.GetNthSegment(segment_number).GetName()
@@ -1137,7 +1141,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       
       imgpath = self.image_list[self.current_ind]['segmentation path']
       if not imgpath or not imgpath.exists():
-        slicer.util.infodisplay("Could not load segmenation: {}, does not exist".format(imgpath))
+        slicer.util.infoDisplay("Could not load segmenation: {}, does not exist".format(imgpath))
         self.segmentation_node = None
         return
 
@@ -1201,8 +1205,8 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       # Export segment as vtkImageData (via temporary labelmap volume node)
       segmentIds = vtk.vtkStringArray()
       current_segmentation.GetSegmentIDs(segmentIds)
-      segmentIds.InsertNextValue('Entropion')
-      self.segmentation_node.GetSegmentation().AddEmptySegment('Entropion')
+      segmentIds.InsertNextValue('EyelidMargin')
+      self.segmentation_node.GetSegmentation().AddEmptySegment('EyelidMargin')
       self.setSegmentationLabelNames()
       
       # Save this label to image
@@ -1247,9 +1251,9 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       newmask = newmask + mask
       slicer.util.updateVolumeFromArray(clone, newmask)
       segmentIds.InsertNextValue('EyeLid')
-      segmentIds.InsertNextValue('Entropion')
+      segmentIds.InsertNextValue('EyelidMargin')
       self.segmentation_node.GetSegmentation().AddEmptySegment('EyeLid')
-      self.segmentation_node.GetSegmentation().AddEmptySegment('Entropion')
+      self.segmentation_node.GetSegmentation().AddEmptySegment('EyelidMargin')
       slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(clone, self.segmentation_node, segmentIds)
       self.setSegmentationLabelNames()
       
@@ -1486,7 +1490,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         or self.current_ind not in range(len(self.image_list)):
         logging.debug('Nothing to update for master table, returning')
         return
-
+      print(self.image_list[self.current_ind])
       self.image_list[self.current_ind]['n samples'] = self.ui.imagePatchesTableWidget.rowCount
       labelColumn = [ self.ui.imagePatchesTableWidget.item(row, 1).text() for row in range(self.ui.imagePatchesTableWidget.rowCount)]
       self.image_list[self.current_ind]['n tt'] = len( [row for row in labelColumn if row == 'TT'] )
@@ -1497,13 +1501,15 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.image_list[self.current_ind]['n none'] = len( [row for row in labelColumn if row == 'Unknown'] )
 
       # Get the checkbox state.
-      checkboxkeys = ['graded', 'blurry','mislabeled']
+      checkchangeskeys = ['tt present', 'tt sev', 'n lashes touching', 'epilation sev']
       for columnid in range(self.ui.imageDetailsTable.columnCount):
         # Save the current state of the table
         headerlabel = self.ui.imageDetailsTable.horizontalHeaderItem(columnid).text()
-        if headerlabel in checkboxkeys:
+        if headerlabel in self.checkboxKeys:
           state = self.ui.imageDetailsTable.item(self.current_ind, columnid).checkState()
           self.image_list[self.current_ind][headerlabel] = 0 if state==qt.Qt.Unchecked else 1
+        elif headerlabel in checkchangeskeys:
+          self.image_list[self.current_ind][headerlabel] = int(self.ui.imageDetailsTable.item(self.current_ind, columnid).text())
         elif headerlabel.startswith('n ') or headerlabel == 'segmentation path':
           self.ui.imageDetailsTable.item(self.current_ind, columnid).setText('{}'.format(self.image_list[self.current_ind][headerlabel]))
       if self.image_list[self.current_ind]['graded'] == 1:
@@ -1511,6 +1517,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       else:
         if self.current_ind in self.num_graded:
           self.num_graded.remove(self.current_ind)
+      print(self.image_list[self.current_ind])
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------
