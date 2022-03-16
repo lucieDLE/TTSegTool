@@ -793,10 +793,11 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
   #------------------------------------------------------------------------------
     def addOptionalKey(self, row, key):
-      if key not in row:
-        row[key] = 0
+      comment_key = 'comments'
+      if key == comment_key: 
+        row[key] = "None" if comment_key not in row else row[key]
       else:
-        row[key] = int(row[key])
+        row[key] = 0 if key not in row else int(row[key])
 
   #------------------------------------------------------------------------------
     def createMasterDict(self, image_list):
@@ -847,6 +848,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
           # self.addOptionalKey(row, 'blurry')
           # self.addOptionalKey(row, 'mislabeled')
           # self.addOptionalKey(row, 'pre-tt')
+          self.addOptionalKey(row, 'comments')
           self.addOptionalKey(row, 'n samples')
           self.addOptionalKey(row, 'n tt')
           self.addOptionalKey(row, 'n probtt')
@@ -902,6 +904,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         return
 
       keys = [key for key in self.checkboxKeys]
+      keys.append('comments') # Placing comments right after check box
       all_other = [key for key in self.image_list[0].keys() if key not in keys]
       keys.extend(all_other)
       self.ui.imageDetailsTable.enabled = 1
@@ -1364,6 +1367,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def writeFinalMasterCSV(self):
       if len(self.image_list) > 0 and self.path_to_server is not None:
         csv_file_name = self.path_to_image_details.name
+        # Create a temporary file by user name as a backup.
         csv_file_name = csv_file_name.replace('.csv', '_{}.csv'.format(self.user_name))
         if self.temp_path:
           path = self.temp_path / csv_file_name
@@ -1512,6 +1516,8 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
           self.image_list[self.current_ind][headerlabel] = int(self.ui.imageDetailsTable.item(self.current_ind, columnid).text())
         elif headerlabel.startswith('n ') or headerlabel == 'segmentation path':
           self.ui.imageDetailsTable.item(self.current_ind, columnid).setText('{}'.format(self.image_list[self.current_ind][headerlabel]))
+        elif headerlabel == 'comments':
+          self.image_list[self.current_ind][headerlabel] = self.ui.imageDetailsTable.item(self.current_ind, columnid).text()
       if self.image_list[self.current_ind]['graded'] == 1:
         self.num_graded.add(self.current_ind)
       else:
