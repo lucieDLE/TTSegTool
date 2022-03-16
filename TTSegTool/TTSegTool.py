@@ -57,7 +57,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       ScriptedLoadableModuleWidget.__init__(self, parent)
       VTKObservationMixin.__init__(self)
       slicer.mrmlScene.Clear()
-      self.checkboxKeys = ['graded', 'blurry','mislabeled', "pre-tt", "eye-looks-up", "incomplete-eye"]
+      self.checkboxKeys = ['graded', 'blurry','mislabeled', "pre-tt", "eye-angle-wrong", "incomplete-eye"]
 
     def setup(self):
       ScriptedLoadableModuleWidget.setup(self)
