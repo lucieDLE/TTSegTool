@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>538</width>
-    <height>1005</height>
+    <height>1015</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -16,10 +16,113 @@
     <verstretch>0</verstretch>
    </sizepolicy>
   </property>
-  <layout class="QVBoxLayout" name="verticalLayout">
-   <item>
-    <widget class="ctkCollapsibleButton" name="inputsCollapsibleButton" native="true">
-     <property name="text" stdset="0">
+  <layout class="QGridLayout" name="gridLayout_3">
+   <item row="3" column="0" colspan="2">
+    <widget class="ctkCollapsibleButton" name="navigationCollapsibleButton">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
+     <property name="text">
+      <string>Navigation</string>
+     </property>
+     <layout class="QFormLayout" name="formLayout_4">
+      <property name="formAlignment">
+       <set>Qt::AlignHCenter|Qt::AlignTop</set>
+      </property>
+      <item row="0" column="0">
+       <widget class="QToolButton" name="findPrevUngradedButton">
+        <property name="text">
+         <string>&lt;&lt;</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QPushButton" name="saveMasterFileButton">
+        <property name="text">
+         <string>SAVE CURRENT STATE</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QScrollBar" name="imageNavigationScrollBar">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Fixed" vsizetype="MinimumExpanding">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="mouseTracking">
+         <bool>false</bool>
+        </property>
+        <property name="focusPolicy">
+         <enum>Qt::TabFocus</enum>
+        </property>
+        <property name="toolTip">
+         <string>Chose either left or right arrow to move between images</string>
+        </property>
+        <property name="maximum">
+         <number>0</number>
+        </property>
+        <property name="pageStep">
+         <number>1</number>
+        </property>
+        <property name="tracking">
+         <bool>false</bool>
+        </property>
+        <property name="orientation">
+         <enum>Qt::Vertical</enum>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QTableWidget" name="imageDetailsTable">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="imagePosLabel">
+        <property name="text">
+         <string>0/0</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QToolButton" name="findUngradedButton">
+        <property name="toolTip">
+         <string>Move to the next ungraded image</string>
+        </property>
+        <property name="text">
+         <string>&gt;&gt;</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QLabel" name="imageDetailsLabel">
+        <property name="text">
+         <string>No Images Selected yet</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignCenter</set>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item row="0" column="0" rowspan="2" colspan="2">
+    <widget class="ctkCollapsibleButton" name="inputsCollapsibleButton">
+     <property name="text">
       <string>Inputs</string>
      </property>
      <layout class="QVBoxLayout" name="verticalLayout_4">
@@ -76,7 +179,7 @@
           </widget>
          </item>
          <item row="2" column="1">
-          <widget class="ctkDirectoryButton" name="imageDirButton" native="true">
+          <widget class="ctkDirectoryButton" name="imageDirButton">
            <property name="focusPolicy">
             <enum>Qt::TabFocus</enum>
            </property>
@@ -95,111 +198,76 @@
      </layout>
     </widget>
    </item>
-   <item>
-    <widget class="ctkCollapsibleButton" name="navigationCollapsibleButton" native="true">
-     <property name="sizePolicy">
-      <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
-       <horstretch>0</horstretch>
-       <verstretch>0</verstretch>
-      </sizepolicy>
+   <item row="2" column="0">
+    <widget class="ctkCollapsibleButton" name="inputsCollapsibleButton_2">
+     <property name="text">
+      <string>Directions</string>
      </property>
-     <property name="text" stdset="0">
-      <string>Navigation</string>
-     </property>
-     <layout class="QFormLayout" name="formLayout_4">
-      <property name="formAlignment">
-       <set>Qt::AlignHCenter|Qt::AlignTop</set>
-      </property>
-      <item row="1" column="0">
-       <widget class="QScrollBar" name="imageNavigationScrollBar">
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Fixed" vsizetype="MinimumExpanding">
-          <horstretch>0</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
-        </property>
-        <property name="mouseTracking">
-         <bool>false</bool>
-        </property>
-        <property name="focusPolicy">
-         <enum>Qt::TabFocus</enum>
-        </property>
-        <property name="toolTip">
-         <string>Chose either left or right arrow to move between images</string>
-        </property>
-        <property name="maximum">
-         <number>0</number>
-        </property>
-        <property name="pageStep">
-         <number>1</number>
-        </property>
-        <property name="tracking">
-         <bool>false</bool>
-        </property>
-        <property name="orientation">
-         <enum>Qt::Vertical</enum>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="1">
-       <widget class="QTableWidget" name="imageDetailsTable">
-        <property name="enabled">
-         <bool>true</bool>
-        </property>
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
-          <horstretch>0</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="0">
-       <widget class="QLabel" name="imagePosLabel">
-        <property name="text">
-         <string>0/0</string>
-        </property>
-       </widget>
-      </item>
-      <item row="3" column="1">
-       <widget class="QLabel" name="imageDetailsLabel">
-        <property name="text">
-         <string>No Images Selected yet</string>
-        </property>
-        <property name="alignment">
-         <set>Qt::AlignCenter</set>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="1">
-       <widget class="QPushButton" name="saveMasterFileButton">
-        <property name="text">
-         <string>SAVE CURRENT STATE</string>
-        </property>
-       </widget>
-      </item>
-      <item row="3" column="0">
-       <widget class="QToolButton" name="findUngradedButton">
-        <property name="toolTip">
-         <string>Move to the next ungraded image</string>
-        </property>
-        <property name="text">
-         <string>&gt;&gt;</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="0">
-       <widget class="QToolButton" name="findPrevUngradedButton">
-        <property name="text">
-         <string>&lt;&lt;</string>
-        </property>
-       </widget>
+     <layout class="QVBoxLayout" name="verticalLayout_6">
+      <item>
+       <layout class="QGridLayout" name="gridLayout_4">
+        <item row="1" column="6">
+         <widget class="QPushButton" name="moveRightButton">
+          <property name="text">
+           <string>Right</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="5">
+         <widget class="QPushButton" name="moveDownButton">
+          <property name="text">
+           <string>Down</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="3">
+         <spacer name="horizontalSpacer_2">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>30</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+        <item row="0" column="0" rowspan="2">
+         <widget class="QPushButton" name="pushZoomInButton">
+          <property name="text">
+           <string>Zoom In</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="4">
+         <widget class="QPushButton" name="moveLeftButton">
+          <property name="text">
+           <string>Left</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="5">
+         <widget class="QPushButton" name="moveUpButton">
+          <property name="text">
+           <string>Up</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1" rowspan="2">
+         <widget class="QPushButton" name="pushZoomOutButton">
+          <property name="text">
+           <string>Zoom Out</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
       </item>
      </layout>
     </widget>
    </item>
-   <item>
-    <widget class="ctkCollapsibleButton" name="imagePatchCollapsibleButton" native="true">
+   <item row="5" column="0" colspan="2">
+    <widget class="ctkCollapsibleButton" name="imagePatchCollapsibleButton">
      <property name="sizePolicy">
       <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
        <horstretch>0</horstretch>
@@ -212,10 +280,10 @@
        <height>150</height>
       </size>
      </property>
-     <property name="text" stdset="0">
+     <property name="text">
       <string>Patch Sampling</string>
      </property>
-     <property name="collapsed" stdset="0">
+     <property name="collapsed">
       <bool>false</bool>
      </property>
      <layout class="QHBoxLayout" name="horizontalLayout_2">
@@ -294,18 +362,18 @@
      </layout>
     </widget>
    </item>
-   <item>
-    <widget class="ctkCollapsibleButton" name="segmentEditorCollapsibleButton" native="true">
+   <item row="7" column="0" colspan="2">
+    <widget class="ctkCollapsibleButton" name="segmentEditorCollapsibleButton">
      <property name="sizePolicy">
       <sizepolicy hsizetype="Minimum" vsizetype="MinimumExpanding">
        <horstretch>0</horstretch>
        <verstretch>0</verstretch>
       </sizepolicy>
      </property>
-     <property name="text" stdset="0">
+     <property name="text">
       <string>Segmentation Editor</string>
      </property>
-     <property name="collapsed" stdset="0">
+     <property name="collapsed">
       <bool>false</bool>
      </property>
      <layout class="QVBoxLayout" name="verticalLayout_3">
@@ -330,7 +398,7 @@
        </widget>
       </item>
       <item>
-       <widget class="qMRMLSegmentEditorWidget" name="segmentEditorWidget" native="true"/>
+       <widget class="qMRMLSegmentEditorWidget" name="segmentEditorWidget"/>
       </item>
      </layout>
     </widget>
