@@ -57,7 +57,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       ScriptedLoadableModuleWidget.__init__(self, parent)
       VTKObservationMixin.__init__(self)
       slicer.mrmlScene.Clear()
-      self.checkboxKeys = ['graded', 'blurry','mislabeled', "pre-tt", "eye-angle-wrong", "incomplete-eye"]
+      self.checkboxKeys = ['graded', 'blurry', "eye-angle-wrong",]
 
     def setup(self):
       ScriptedLoadableModuleWidget.setup(self)
@@ -100,7 +100,15 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     
       self.prevImageShortcut = qt.QShortcut(qt.QKeySequence(qt.Qt.Key_Alt + qt.Qt.Key_Up), self.parent)
       self.prevImageShortcut.connect('activated()', self.moveToPrevImageInList)
+
+      # self.zoomInShortcut = qt.QShortcut(qt.QKeySequence('Ctlr' + '+'), self.parent)
+      shortcut_zoom_in = qt.QShortcut(slicer.util.mainWindow())
+      shortcut_zoom_in.setKey(qt.QKeySequence('Ctlr' + '+'))
+      shortcut_zoom_in.connect('activated()', lambda: self.adjustZoom(0.9))
       
+      # self.zoomOutShortcut = qt.QShortcut(qt.QKeySequence("Ctlr" + '-'), self.parent)
+      # self.zoomOutShortcut.connect('activated()', lambda: self.adjustZoom(1.1))
+
       self.filter = CloseApplicationEventFilter()
       slicer.util.mainWindow().installEventFilter(self.filter)
     
@@ -192,16 +200,28 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.ui.findUngradedButton.clicked.connect(self.onFindUngradedClicked)
       self.ui.imageDetailsTable.itemClicked.connect(self.onImageDetailsRowClicked)
       self.ui.imageDetailsTable.itemSelectionChanged.connect(self.onImageDetailsItemSelected)
+
+      self.ui.pushZoomInButton.clicked.connect(lambda: self.adjustZoom(0.9))
+      self.ui.pushZoomOutButton.clicked.connect(lambda: self.adjustZoom(1.1))
+
+      self.ui.moveLeftButton.clicked.connect(lambda: self.moveSliceView(-30, 0))
+      self.ui.moveRightButton.clicked.connect(lambda: self.moveSliceView(30, 0))
+      self.ui.moveUpButton.clicked.connect(lambda: self.moveSliceView(0, 30))
+      self.ui.moveDownButton.clicked.connect(lambda: self.moveSliceView(0, -30))
+        
+
       # Patch management
       self.ui.keepPatchPushButton.clicked.connect(self.onSavePatchesButtonClicked)
       self.ui.delPatchPushButton.clicked.connect(self.onDelPatchClicked)
       self.ui.patchLabelComboBox.addItems(["TT", "Probable TT", "Healthy", "Epilation", "Probable Epilation", 
-      "Unknown"])
+      "Unknown", "Gap", "Entropion", "Overcorrection"])
+      
       self.ui.startPatchEditModeButton.clicked.connect(self.switchPatchEditMode)
       self.ui.patchLabelComboBox.currentIndexChanged.connect(self.updateFiducialLabel)
       self.ui.imagePatchesTableWidget.currentCellChanged.connect(self.updateFiducialSelection)
       # segmentation management
       self.ui.showSegmentationCheckBox.stateChanged.connect(self.changeSegmentationVisibility)
+      self.ui.startSegmentEditModeButton.clicked.connect(self.switchSegmentEditMode)
       self.addMarkupObservers()
 
     #------------------------------------------------------------------------------
@@ -227,7 +247,40 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
       self.patchEditModeOn = not self.patchEditModeOn
       self.setupPatchEditMode()
-    
+
+    #------------------------------------------------------------------------------
+
+
+    def adjustZoom(self, factor):
+      layoutManager = slicer.app.layoutManager()
+      sliceWidget = layoutManager.sliceWidget('Red')
+      sliceLogic = sliceWidget.sliceLogic()
+      sliceNode = sliceLogic.GetSliceNode()
+      currentFOV = sliceNode.GetFieldOfView()
+      newFOV = [dim * factor for dim in currentFOV]
+
+      sliceNode.SetFieldOfView(newFOV[0], newFOV[1], newFOV[2])
+      # sliceWidget.fitSliceToBackground()
+
+    def moveSliceView(self, xMove, yMove):
+      layoutManager = slicer.app.layoutManager()
+      sliceWidget = layoutManager.sliceWidget('Red')
+      sliceLogic = sliceWidget.sliceLogic()
+      sliceNode = sliceLogic.GetSliceNode()
+
+      # Get the current SliceToRAS matrix
+      sliceToRAS = sliceNode.GetSliceToRAS()
+      
+      # Create a translation matrix
+      translation = vtk.vtkMatrix4x4()
+      translation.Identity()
+      translation.SetElement(0, 3, xMove)
+      translation.SetElement(1, 3, yMove)
+      
+      # Apply the translation to the SliceToRAS matrix
+      vtk.vtkMatrix4x4.Multiply4x4(sliceToRAS, translation, sliceToRAS)
+      sliceNode.UpdateMatrices()
+
     #------------------------------------------------------------------------------
     def setupSegmentEditMode(self):
       if self.ui is None:
@@ -236,12 +289,14 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.handleSegmentModeOnOFf()
       self.ui.startSegmentEditModeButton.setChecked(self.segmentEditModeOn)
       if self.segmentEditModeOn:
+        print("Starting segment mode on")
         self.ui.startSegmentEditModeButton.setStyleSheet("QPushButton {background-color: rgb(214, 0, 0)}")
         self.ui.startSegmentEditModeButton.setText("   STOP SEGMENTATION EDIT MODE   ")
         self.save_segmentation_flag = True
       else:
         self.ui.startSegmentEditModeButton.setStyleSheet("QPushButton {background-color: rgb(85, 170, 0)}")
         self.ui.startSegmentEditModeButton.setText("   START SEGMENTATION EDIT MODE   ")
+        print("Switching segment mode off")
 
     #------------------------------------------------------------------------------
     def switchSegmentEditMode(self):
@@ -250,6 +305,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.switchPatchEditMode()
 
       self.segmentEditModeOn = not self.segmentEditModeOn
+      print(self.segmentEditModeOn)
       self.setupSegmentEditMode()
     
     #------------------------------------------------------------------------------
@@ -751,8 +807,8 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if self.path_to_server is None:
         slicer.util.errorDisplay('Please provide a valid server path ')
         return
-      if not self.checkMasterFileForRequiredFields():
-        slicer.util.errorDisplay('Did not find the fields that are at least required')
+      # if not self.checkMasterFileForRequiredFields():
+      #   slicer.util.errorDisplay('Did not find the fields that are at least required')
 
       logging.info('Found the required fields in the master file! Loading')
       try:
@@ -780,15 +836,11 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       all_good = True
       with open(self.path_to_image_details, 'r', newline='') as f:
           dr = DictReader(f)
-          all_good = all_good & ('cid' in dr.fieldnames) \
-                              & ('eye' in dr.fieldnames) \
-                              & ('tt present' in dr.fieldnames) \
-                                & ('tt sev' in dr.fieldnames) \
-                                  & ('n lashes touching' in dr.fieldnames) \
-                                    & ('epilation sev' in dr.fieldnames) \
-                                      & ('image path' in dr.fieldnames) \
-                                        & ('segmentation path' in dr.fieldnames) \
-                                          & ('patches path' in dr.fieldnames)
+          all_good = all_good & ('image path' in dr.fieldnames)
+                              # & ('cid' in dr.fieldnames) \
+                              # & ('eye' in dr.fieldnames) \
+                              # & ('patches path' in dr.fieldnames) \
+                              # & ('segmentation path' in dr.fieldnames)
       return all_good
 
   #------------------------------------------------------------------------------
@@ -817,7 +869,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         # if len(row['image path']) ==0 or len(row['segmentation path']) == 0:
         if len(row['image path']) ==0:
-          logging.error('Found an empty Image path or Segmentation path in the master file, image: {}, seg: {}'.format(row['image path'], row['segmentation path']))
+          logging.error('Found an empty Image path or Segmentation path in the master file, image: {}'.format(row['image path']))
           continue
         row['image path'] = self.path_to_server / row['image path'].lstrip("\\").replace("\\", "/")
         row['segmentation path'] = self.path_to_server / row['segmentation path'].lstrip("\\").replace("\\","/") if len(row['segmentation path']) >0 else ''
@@ -837,10 +889,10 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
           row['patches path'] = new_output_dir / (image_name + '.csv')
           try_to_read_patches = True
         try:
-          row['tt present'] = int(row['tt present'])
-          row['tt sev'] = int(row['tt sev'])
-          row['n lashes touching'] = int(row['n lashes touching'])
-          row['epilation sev'] = int(row['epilation sev'])
+          # row['tt present'] = int(row['tt present'])
+          # row['tt sev'] = int(row['tt sev'])
+          # row['n lashes touching'] = int(row['n lashes touching'])
+          # row['epilation sev'] = int(row['epilation sev'])
         
           # Add any missing keys and initialize a temp file.
           for k in self.checkboxKeys:
@@ -849,14 +901,13 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
           # self.addOptionalKey(row, 'blurry')
           # self.addOptionalKey(row, 'mislabeled')
           # self.addOptionalKey(row, 'pre-tt')
-          self.addOptionalKey(row, 'comments')
-          self.addOptionalKey(row, 'n samples')
-          self.addOptionalKey(row, 'n tt')
-          self.addOptionalKey(row, 'n probtt')
-          self.addOptionalKey(row, 'n epi')
-          self.addOptionalKey(row, 'n probepi')
-          self.addOptionalKey(row, 'n healthy')
-          self.addOptionalKey(row, 'n none')
+          # self.addOptionalKey(row, 'n samples')
+          # self.addOptionalKey(row, 'n tt')
+          # self.addOptionalKey(row, 'n probtt')
+          # self.addOptionalKey(row, 'n epi')
+          # self.addOptionalKey(row, 'n probepi')
+          # self.addOptionalKey(row, 'n healthy')
+          # self.addOptionalKey(row, 'n none')
         except Exception as e:
           logging.error('Error either converting keys to in or adding other keys')
           self.image_list = []
@@ -865,14 +916,14 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
           patch_rows = self.readCSV(row['patches path'])
           if len(patch_rows) == 0:
             logging.warning("Error reading pre-existing patches file: {}".format(row['patches path']))
-          row['n samples'] = len(patch_rows)
+          # row['n samples'] = len(patch_rows)
           # ["TT", "Probable TT", "Healthy", "Epilation", "Unknown"]
-          row['n tt'] = len( [l for l in patch_rows if l['label'] == 'TT'] )
-          row['n probtt'] = len( [l for l in patch_rows if l['label'] == 'Probable TT'] )
-          row['n epi'] = len( [l for l in patch_rows if l['label'] == 'Epilation'] )
-          row['n probepi'] = len( [l for l in patch_rows if l['label'] == 'Probable Epilation'] )
-          row['n healthy'] = len( [l for l in patch_rows if l['label'] == 'Healthy'] )
-          row['n none'] = len( [l for l in patch_rows if l['label'] == 'Unknown'] )
+          # row['n tt'] = len( [l for l in patch_rows if l['label'] == 'TT'] )
+          # row['n probtt'] = len( [l for l in patch_rows if l['label'] == 'Probable TT'] )
+          # row['n epi'] = len( [l for l in patch_rows if l['label'] == 'Epilation'] )
+          # row['n probepi'] = len( [l for l in patch_rows if l['label'] == 'Probable Epilation'] )
+          # row['n healthy'] = len( [l for l in patch_rows if l['label'] == 'Healthy'] )
+          # row['n none'] = len( [l for l in patch_rows if l['label'] == 'Unknown'] )
         self.image_list.append(row)
       progress.setValue(len(image_list))
       logging.debug('Number of images read: {}'.format(len(self.image_list)))
@@ -1104,8 +1155,8 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         found_at_least_one = False
         for row in self.image_list:
           image_path = row['image path']
-          seg_path_exists = row['segmentation path'].exists() if len(row['segmentation path']) > 0 else True
-          if image_path.exists() and seg_path_exists:
+          seg_path_exists = row['segmentation path'].exists() if len(str(row['segmentation path'])) > 0 else True
+          if image_path.exists():
             found_at_least_one = True
             break
 
@@ -1129,10 +1180,14 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         name = current_segmentation.GetNthSegment(segment_number).GetName()
         if label in segment_label_names and name != segment_label_names[label]:
           current_segmentation.GetNthSegment(segment_number).SetName(segment_label_names[label])
+          if label == 2:
+            segmentId = current_segmentation.GetSegmentIdBySegmentName("Cornea")
+            # Change the display color for eyelid, as the default is not suitable
+            current_segmentation.GetSegment(segmentId).SetColor(0.5,0,0)
           if label == 3:
             segmentId = current_segmentation.GetSegmentIdBySegmentName("EyeLid")
             # Change the display color for eyelid, as the default is not suitable
-            current_segmentation.GetSegment(segmentId).SetColor(0.5,0,0)
+            current_segmentation.GetSegment(segmentId).SetColor(0.5,0.45,0)
 
   #------------------------------------------------------------------------------
   #------------------------------------------------------------------------------  
@@ -1144,10 +1199,10 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         logging.warning("Wrong image index: {}".format(self.current_ind))
       
       imgpath = self.image_list[self.current_ind]['segmentation path']
-      if len(imgpath) == 0:
+      if len(str(imgpath)) == 0:
         logging.info("Segmentation does not exist")
         return
-      if len(imgpath)> 0 and not imgpath.exists():
+      if len(str(imgpath))> 0 and not imgpath.exists():
         slicer.util.infoDisplay("Could not load segmenation: {}, does not exist".format(imgpath))
         self.segmentation_node = None
         return
@@ -1387,7 +1442,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             for listrow in self.image_list:
               row = listrow.copy()
               row['image path'] = row['image path'].relative_to(self.path_to_server)
-              row['segmentation path'] = row['segmentation path'].relative_to(self.path_to_server) if len(row['segmentation path'])>0 else ''
+              row['segmentation path'] = row['segmentation path'].relative_to(self.path_to_server) if len(str(row['segmentation path']))>0 else ''
               if row['patches path'].exists():
                 row['patches path'] = row['patches path'].relative_to(self.path_to_server)
               else:
@@ -1499,17 +1554,18 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         logging.debug('Nothing to update for master table, returning')
         return
       print(self.image_list[self.current_ind])
-      self.image_list[self.current_ind]['n samples'] = self.ui.imagePatchesTableWidget.rowCount
+      # self.image_list[self.current_ind]['n samples'] = self.ui.imagePatchesTableWidget.rowCount
       labelColumn = [ self.ui.imagePatchesTableWidget.item(row, 1).text() for row in range(self.ui.imagePatchesTableWidget.rowCount)]
-      self.image_list[self.current_ind]['n tt'] = len( [row for row in labelColumn if row == 'TT'] )
-      self.image_list[self.current_ind]['n probtt'] = len( [row for row in labelColumn if row == 'Probable TT'] )
-      self.image_list[self.current_ind]['n epi'] = len( [row for row in labelColumn if row == 'Epilation'] )
-      self.image_list[self.current_ind]['n probepi'] = len( [row for row in labelColumn if row == 'Probable Epilation'] )
-      self.image_list[self.current_ind]['n healthy'] = len( [row for row in labelColumn if row == 'Healthy'] )
-      self.image_list[self.current_ind]['n none'] = len( [row for row in labelColumn if row == 'Unknown'] )
+      # self.image_list[self.current_ind]['n tt'] = len( [row for row in labelColumn if row == 'TT'] )
+      # self.image_list[self.current_ind]['n probtt'] = len( [row for row in labelColumn if row == 'Probable TT'] )
+      # self.image_list[self.current_ind]['n epi'] = len( [row for row in labelColumn if row == 'Epilation'] )
+      # self.image_list[self.current_ind]['n probepi'] = len( [row for row in labelColumn if row == 'Probable Epilation'] )
+      # self.image_list[self.current_ind]['n healthy'] = len( [row for row in labelColumn if row == 'Healthy'] )
+      # self.image_list[self.current_ind]['n none'] = len( [row for row in labelColumn if row == 'Unknown'] )
 
       # Get the checkbox state.
-      checkchangeskeys = ['tt present', 'tt sev', 'n lashes touching', 'epilation sev']
+      # checkchangeskeys = ['tt present', 'tt sev', 'n lashes touching', 'epilation sev']
+      checkchangeskeys = []
       for columnid in range(self.ui.imageDetailsTable.columnCount):
         # Save the current state of the table
         headerlabel = self.ui.imageDetailsTable.horizontalHeaderItem(columnid).text()
