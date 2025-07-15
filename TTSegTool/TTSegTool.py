@@ -57,7 +57,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       ScriptedLoadableModuleWidget.__init__(self, parent)
       VTKObservationMixin.__init__(self)
       slicer.mrmlScene.Clear()
-      self.checkboxKeys = ['graded', 'blurry', "eye-angle-wrong",]
+      self.checkboxKeys = ['graded', 'blurry', "eye-angle-wrong","no surgery"]
 
     def setup(self):
       ScriptedLoadableModuleWidget.setup(self)
@@ -213,8 +213,8 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       # Patch management
       self.ui.keepPatchPushButton.clicked.connect(self.onSavePatchesButtonClicked)
       self.ui.delPatchPushButton.clicked.connect(self.onDelPatchClicked)
-      self.ui.patchLabelComboBox.addItems(["TT", "Probable TT", "Healthy", "Epilation", "Probable Epilation", 
-      "Unknown", "Gap", "Entropion", "Overcorrection"])
+      self.ui.patchLabelComboBox.addItems(["Healthy", "Unknown", "Gap", "Entropion", "overcorrection",
+                                           "Wavy/ECA", "Short Incision", "Fleshy", "Lid Margin Split","TT","Probable TT","Epilation", "Probable Epilation"])
       
       self.ui.startPatchEditModeButton.clicked.connect(self.switchPatchEditMode)
       self.ui.patchLabelComboBox.currentIndexChanged.connect(self.updateFiducialLabel)
@@ -807,8 +807,8 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if self.path_to_server is None:
         slicer.util.errorDisplay('Please provide a valid server path ')
         return
-      # if not self.checkMasterFileForRequiredFields():
-      #   slicer.util.errorDisplay('Did not find the fields that are at least required')
+      if not self.checkMasterFileForRequiredFields():
+        slicer.util.errorDisplay('Did not find the fields that are at least required')
 
       logging.info('Found the required fields in the master file! Loading')
       try:
@@ -817,6 +817,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.updateUI()
         image_list = None
         image_list = self.readCSV(self.path_to_image_details)
+        logging.info(f'Len of image list : {len(image_list)}')
         if len(image_list) == 0:
           raise IOError('Error reading the Master CSV File')
         self.createMasterDict(image_list)
@@ -836,11 +837,11 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       all_good = True
       with open(self.path_to_image_details, 'r', newline='') as f:
           dr = DictReader(f)
-          all_good = all_good & ('image path' in dr.fieldnames)
-                              # & ('cid' in dr.fieldnames) \
-                              # & ('eye' in dr.fieldnames) \
-                              # & ('patches path' in dr.fieldnames) \
-                              # & ('segmentation path' in dr.fieldnames)
+          all_good = all_good & ('cid' in dr.fieldnames) \
+                              & ('eye' in dr.fieldnames) \
+                              & ('image path' in dr.fieldnames) \
+                              & ('segmentation path' in dr.fieldnames) \
+                              & ('patches path' in dr.fieldnames)
       return all_good
 
   #------------------------------------------------------------------------------
@@ -869,7 +870,7 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         # if len(row['image path']) ==0 or len(row['segmentation path']) == 0:
         if len(row['image path']) ==0:
-          logging.error('Found an empty Image path or Segmentation path in the master file, image: {}'.format(row['image path']))
+          logging.error('Found an empty Image path or Segmentation path in the master file, image: {}, seg: {}'.format(row['image path'], row['segmentation path']))
           continue
         row['image path'] = self.path_to_server / row['image path'].lstrip("\\").replace("\\", "/")
         row['segmentation path'] = self.path_to_server / row['segmentation path'].lstrip("\\").replace("\\","/") if len(row['segmentation path']) >0 else ''
@@ -1452,8 +1453,8 @@ class TTSegToolWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
           copyfile(path, self.path_to_image_details)
           return True
         except IOError as e:
-          logging.error('ERROR Writing out the master csv file.\n {}'.format(e))
-          slicer.util.errorDisplay('ERROR Writing out the master csv file.\n {}'.format(e))
+          logging.error('ERROR Writing out the master csv file.\n {}.\n Please make sure the csv file is not open in a different program'.format(e))
+          slicer.util.errorDisplay('ERROR Writing out the master csv file.\n {}. \nPlease make sure the csv file is not open in a different program'.format(e))
           return False
         except KeyError as e:
           logging.error('ERROR durign key parsing.\n {}'.format(e))
